@@ -7,7 +7,10 @@ export const WS_EVENTS = {
   AUDIO_CHUNK: "audio.chunk",
   TRANSCRIPT_PARTIAL: "transcript.partial",
   TRANSCRIPT_FINAL: "transcript.final",
-  TTS_CHUNK: "tts.chunk"
+  TTS_START: "tts.start",
+  TTS_CHUNK: "tts.chunk",
+  TTS_END: "tts.end",
+  PLAYBACK_ACK: "playback.ack"
 } as const;
 
 export type WsEvent = (typeof WS_EVENTS)[keyof typeof WS_EVENTS];
@@ -44,6 +47,12 @@ export interface InterruptMessage {
   reason?: string;
 }
 
+export interface PlaybackAckMessage {
+  type: typeof WS_EVENTS.PLAYBACK_ACK;
+  requestId: string;
+  sequence?: number;
+}
+
 export interface LlmDeltaMessage {
   type: typeof WS_EVENTS.LLM_DELTA;
   requestId: string;
@@ -68,35 +77,54 @@ export interface ErrorMessage {
   message: string;
 }
 
+export interface TtsStartMessage {
+  type: typeof WS_EVENTS.TTS_START;
+  requestId: string;
+  voice?: string;
+  format: string;
+  mimeType: string;
+}
+
+export interface TtsChunkMessage {
+  type: typeof WS_EVENTS.TTS_CHUNK;
+  requestId: string;
+  sequence: number;
+  chunk: string;
+  mimeType: string;
+  segmentIndex?: number;
+  isFinal?: boolean;
+}
+
+export interface TtsEndMessage {
+  type: typeof WS_EVENTS.TTS_END;
+  requestId: string;
+  reason: "stop" | "interrupted" | "error";
+}
+
 export interface ReservedTranscriptPartialMessage {
   type: typeof WS_EVENTS.TRANSCRIPT_PARTIAL;
   requestId: string;
   text: string;
 }
 
-export interface ReservedTtsChunkMessage {
-  type: typeof WS_EVENTS.TTS_CHUNK;
-  requestId: string;
-  chunk: string;
-  encoding: string;
-}
-
 export type ClientMessage =
   | ClientSessionStartMessage
   | UserTextMessage
   | AudioChunkMessage
-  | InterruptMessage;
+  | InterruptMessage
+  | PlaybackAckMessage;
 
 export type ServerMessage =
   | ServerSessionStartMessage
   | LlmDeltaMessage
   | LlmDoneMessage
   | TranscriptFinalMessage
+  | TtsStartMessage
+  | TtsChunkMessage
+  | TtsEndMessage
   | ErrorMessage;
 
-export type ReservedMessage =
-  | ReservedTranscriptPartialMessage
-  | ReservedTtsChunkMessage;
+export type ReservedMessage = ReservedTranscriptPartialMessage;
 
 export function createRequestId(): string {
   return globalThis.crypto.randomUUID();
