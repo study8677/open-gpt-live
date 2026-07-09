@@ -3,9 +3,11 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import {
   OpenAILLMProvider,
+  OpenAITTSProvider,
   OpenAIWhisperProvider,
   type LLMMessage,
-  type STTProvider
+  type STTProvider,
+  type TTSProvider
 } from "@open-gpt-live/adapters";
 import {
   WS_EVENTS,
@@ -18,15 +20,25 @@ import { WebSocket, WebSocketServer } from "ws";
 
 const port = Number.parseInt(process.env.GATEWAY_PORT ?? "8787", 10);
 const maxAudioTurnBytes = 25 * 1024 * 1024;
+const ttsSegmentMinLength = 24;
+const ttsSegmentMaxLength = 240;
+const ttsFormat = process.env.TTS_FORMAT ?? "mp3";
+const ttsVoice = process.env.TTS_VOICE || undefined;
 const llmProvider = new OpenAILLMProvider();
 const sttProvider = new OpenAIWhisperProvider();
+const configuredTtsProvider = createTtsProvider();
 
 interface ActiveRun {
   requestId: string;
   controller: AbortController;
+  stage: "llm_streaming" | "tts_streaming" | "done" | "interrupted" | "error";
   text: string;
   interrupted: boolean;
-  doneSent: boolean;
+  llmDoneSent: boolean;
+  ttsStarted: boolean;
+  ttsEnded: boolean;
+  ttsSequence: number;
+  ttsSegmentIndex: number;
 }
 
 interface SessionState {
@@ -105,6 +117,10 @@ async function handleMessage(
 
   if (message.type === WS_EVENTS.INTERRUPT) {
     interruptCurrentRun(socket, session, message.reason ?? "user interrupt");
+    return;
+  }
+
+  if (message.type === WS_EVENTS.PLAYBACK_ACK) {
     return;
   }
 
@@ -261,38 +277,115 @@ async function streamAssistantResponse(
   const run: ActiveRun = {
     requestId,
     controller: new AbortController(),
+    stage: "llm_streaming",
     text: "",
     interrupted: false,
-    doneSent: false
+    llmDoneSent: false,
+    ttsStarted: false,
+    ttsEnded: false,
+    ttsSequence: 0,
+    ttsSegmentIndex: 0
   };
 
   session.current = run;
+  let pendingTtsText = "";
+  let ttsQueue = Promise.resolve();
+  let ttsError: unknown;
+
+  const enqueueTtsSegment = (text: string, isFinalSegment: boolean): void => {
+    ttsQueue = ttsQueue
+      .then(async () => {
+        if (
+          ttsError ||
+          run.interrupted ||
+          run.controller.signal.aborted ||
+          session.current !== run
+        ) {
+          return;
+        }
+
+        await streamTtsSegment(
+          socket,
+          run,
+          configuredTtsProvider,
+          text,
+          isFinalSegment
+        );
+      })
+      .catch((error: unknown) => {
+        ttsError ??= error;
+        if (!run.interrupted && !run.controller.signal.aborted) {
+          run.controller.abort("tts error");
+        }
+      });
+  };
 
   try {
     for await (const chunk of llmProvider.streamText(session.history, {
       signal: run.controller.signal
     })) {
-      if (run.interrupted || run.doneSent || session.current !== run) {
+      if (run.interrupted || run.llmDoneSent || session.current !== run) {
         break;
       }
 
       run.text += chunk.delta;
+      pendingTtsText += chunk.delta;
       send(socket, {
         type: WS_EVENTS.LLM_DELTA,
         requestId,
         delta: chunk.delta
       });
+
+      const readySegments = takeReadyTtsSegments(pendingTtsText);
+      pendingTtsText = readySegments.remainder;
+      for (const segment of readySegments.segments) {
+        enqueueTtsSegment(segment, false);
+      }
     }
 
     if (!run.interrupted && session.current === run) {
+      if (ttsError) {
+        throw ttsError;
+      }
       if (run.text) {
         session.history.push({ role: "assistant", content: run.text });
       }
-      sendDone(socket, session, run, "stop");
+      sendLlmDone(socket, run, "stop");
+      if (pendingTtsText.trim()) {
+        enqueueTtsSegment(pendingTtsText, true);
+      }
+      await ttsQueue;
+      if (ttsError) {
+        throw ttsError;
+      }
+      if (
+        run.interrupted ||
+        run.controller.signal.aborted ||
+        session.current !== run
+      ) {
+        return;
+      }
+      sendTtsEnd(socket, run, "stop");
+      finishRun(session, run, "done");
     }
   } catch (error) {
+    if (ttsError && !run.interrupted) {
+      send(socket, {
+        type: "error",
+        requestId,
+        message:
+          ttsError instanceof Error ? ttsError.message : "Unknown TTS gateway error"
+      });
+      sendLlmDone(socket, run, "error");
+      sendTtsEnd(socket, run, "error");
+      finishRun(session, run, "error");
+      return;
+    }
+
     if (run.controller.signal.aborted || run.interrupted) {
-      sendDone(socket, session, run, "interrupted");
+      sendLlmDone(socket, run, "interrupted");
+      sendTtsEnd(socket, run, "interrupted");
+      finishRun(session, run, "interrupted");
       return;
     }
 
@@ -301,7 +394,9 @@ async function streamAssistantResponse(
       requestId,
       message: error instanceof Error ? error.message : "Unknown gateway error"
     });
-    sendDone(socket, session, run, "error");
+    sendLlmDone(socket, run, "error");
+    sendTtsEnd(socket, run, "error");
+    finishRun(session, run, "error");
   }
 }
 
@@ -313,26 +408,128 @@ function interruptCurrentRun(socket: WebSocket, session: SessionState, reason: s
 
   run.interrupted = true;
   run.controller.abort(reason);
-  sendDone(socket, session, run, "interrupted");
+  sendLlmDone(socket, run, "interrupted");
+  sendTtsEnd(socket, run, "interrupted");
+  finishRun(session, run, "interrupted");
 }
 
-function sendDone(
+async function streamTtsSegment(
   socket: WebSocket,
-  session: SessionState,
   run: ActiveRun,
-  reason: LlmDoneMessage["reason"]
-): void {
-  if (run.doneSent) {
+  provider: TTSProvider | undefined,
+  text: string,
+  isFinalSegment: boolean
+): Promise<void> {
+  const segmentText = text.trim();
+  if (!provider || !segmentText || run.interrupted || run.controller.signal.aborted) {
     return;
   }
 
-  run.doneSent = true;
+  if (!run.ttsStarted) {
+    run.ttsStarted = true;
+    send(socket, {
+      type: WS_EVENTS.TTS_START,
+      requestId: run.requestId,
+      voice: ttsVoice,
+      format: ttsFormat,
+      mimeType: "audio/mpeg"
+    });
+  }
+
+  run.stage = "tts_streaming";
+  const segmentIndex = run.ttsSegmentIndex++;
+  let pendingChunk:
+    | {
+        audio: Uint8Array;
+        mimeType: string;
+      }
+    | undefined;
+
+  for await (const chunk of provider.synthesize(
+    {
+      text: segmentText,
+      voice: ttsVoice,
+      format: ttsFormat
+    },
+    { signal: run.controller.signal }
+  )) {
+    if (run.interrupted || run.controller.signal.aborted) {
+      return;
+    }
+
+    if (pendingChunk) {
+      sendTtsChunk(socket, run, pendingChunk, segmentIndex, false);
+    }
+
+    pendingChunk = {
+      audio: chunk.audio,
+      mimeType: chunk.mimeType
+    };
+  }
+
+  if (pendingChunk && !run.interrupted && !run.controller.signal.aborted) {
+    sendTtsChunk(socket, run, pendingChunk, segmentIndex, isFinalSegment);
+  }
+}
+
+function sendTtsChunk(
+  socket: WebSocket,
+  run: ActiveRun,
+  chunk: { audio: Uint8Array; mimeType: string },
+  segmentIndex: number,
+  isFinal: boolean
+): void {
+  send(socket, {
+    type: WS_EVENTS.TTS_CHUNK,
+    requestId: run.requestId,
+    sequence: run.ttsSequence++,
+    chunk: Buffer.from(chunk.audio).toString("base64"),
+    mimeType: chunk.mimeType,
+    segmentIndex,
+    isFinal
+  });
+}
+
+function sendLlmDone(
+  socket: WebSocket,
+  run: ActiveRun,
+  reason: LlmDoneMessage["reason"]
+): void {
+  if (run.llmDoneSent) {
+    return;
+  }
+
+  run.llmDoneSent = true;
   send(socket, {
     type: WS_EVENTS.LLM_DONE,
     requestId: run.requestId,
     reason
   });
+}
 
+function sendTtsEnd(
+  socket: WebSocket,
+  run: ActiveRun,
+  reason: "stop" | "interrupted" | "error"
+): void {
+  if (run.ttsEnded || !run.ttsStarted) {
+    return;
+  }
+
+  run.ttsEnded = true;
+  send(socket, {
+    type: WS_EVENTS.TTS_END,
+    requestId: run.requestId,
+    reason
+  });
+}
+
+function finishRun(
+  session: SessionState,
+  run: ActiveRun,
+  stage: "done" | "interrupted" | "error"
+): void {
+  run.stage = stage;
   if (session.current === run) {
     session.current = undefined;
   }
@@ -360,4 +557,60 @@ function filenameForMimeType(mimeType: string): string {
     return "recording.wav";
   }
   return "recording.webm";
+}
+
+function createTtsProvider(): TTSProvider | undefined {
+  if (!process.env.TTS_API_KEY && !process.env.OPENAI_API_KEY) {
+    return undefined;
+  }
+
+  return new OpenAITTSProvider();
+}
+
+function takeReadyTtsSegments(text: string): {
+  segments: string[];
+  remainder: string;
+} {
+  const segments: string[] = [];
+  let remainder = text;
+
+  while (remainder.length >= ttsSegmentMinLength) {
+    const boundary = findSegmentBoundary(remainder);
+    const splitAt =
+      boundary >= ttsSegmentMinLength
+        ? boundary
+        : remainder.length >= ttsSegmentMaxLength
+          ? ttsSegmentMaxLength
+          : -1;
+
+    if (splitAt === -1) {
+      break;
+    }
+
+    segments.push(remainder.slice(0, splitAt).trim());
+    remainder = remainder.slice(splitAt).trimStart();
+  }
+
+  return {
+    segments: segments.filter(Boolean),
+    remainder
+  };
+}
+
+function findSegmentBoundary(text: string): number {
+  const boundaryPattern = /[.!?。！？；;，,]\s*/g;
+  let match: RegExpExecArray | null;
+  let lastBoundary = -1;
+
+  while ((match = boundaryPattern.exec(text)) !== null) {
+    const boundary = match.index + match[0].length;
+    if (boundary >= ttsSegmentMinLength) {
+      lastBoundary = boundary;
+    }
+    if (boundary >= ttsSegmentMaxLength) {
+      break;
+    }
+  }
+
+  return lastBoundary;
 }
