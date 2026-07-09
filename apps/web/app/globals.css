@@ -144,6 +144,15 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.playbackButton {
+  align-self: flex-start;
+  background: #191919;
+  border: 1px solid #191919;
+  border-radius: 8px;
+  color: #fff;
+  padding: 10px 14px;
+}
+
 .composer {
   display: grid;
   gap: 10px;
