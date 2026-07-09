@@ -28,7 +28,7 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white" />
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-14-000000?style=flat-square&logo=nextdotjs&logoColor=white" />
   <img alt="WebSocket" src="https://img.shields.io/badge/WebSocket-realtime-15B8E8?style=flat-square" />
-  <img alt="OpenAI compatible" src="https://img.shields.io/badge/OpenAI--compatible-LLM%20%2B%20STT-12B886?style=flat-square" />
+  <img alt="OpenAI compatible" src="https://img.shields.io/badge/OpenAI--compatible-LLM%20%2B%20STT%20%2B%20TTS-12B886?style=flat-square" />
 </p>
 
 ## What Is OpenGPT Live?
@@ -42,19 +42,19 @@ browser session
   -> WebSocket gateway
   -> speech-to-text
   -> GPT-style LLM stream
-  -> realtime UI updates
+  -> realtime UI updates and speech playback
 ```
 
-The project currently ships a focused MVP: browser text input, push-to-talk recording, whole-turn STT transcription, in-memory session history, and streamed LLM responses.
+The project currently ships a focused MVP: browser text input, push-to-talk recording, whole-turn STT transcription, in-memory session history, streamed LLM responses, and MP3 TTS playback.
 
 ## Why It Exists
 
 Most voice AI demos are tightly coupled to one vendor API or hide the hard parts behind an opaque SDK. OpenGPT Live keeps the important boundaries visible:
 
 - **Protocol first**: browser and gateway communicate through typed WebSocket events.
-- **Provider flexible**: LLM and STT live behind adapters, starting with OpenAI-compatible APIs.
+- **Provider flexible**: LLM, STT, and TTS live behind adapters, starting with OpenAI-compatible APIs.
 - **Session aware**: each gateway connection owns conversation history and active response state.
-- **Incremental by design**: text loop first, push-to-talk second, TTS and richer interruption state machines later.
+- **Incremental by design**: text loop, push-to-talk, and TTS are implemented as separable protocol layers.
 - **Honest scope**: the MVP does not pretend to be a full agent platform.
 
 ## Current Capabilities
@@ -65,8 +65,8 @@ Most voice AI demos are tightly coupled to one vendor API or hide the hard parts
 | Push-to-talk recording | Working | Uses `MediaRecorder` and sends `audio.chunk` events. |
 | Speech-to-text | Working | Whole-turn transcription through a Whisper-style API. |
 | LLM streaming | Working | OpenAI-compatible `/chat/completions` SSE parsing. |
-| Interrupt | Working for LLM stream | Sends `interrupt` and aborts the active LLM request. |
-| TTS / audio playback | Not yet | Planned for the next milestone. |
+| Interrupt | Working for LLM and TTS | Sends `interrupt` and aborts the active response request. |
+| TTS / audio playback | Working | OpenAI-compatible `/audio/speech` response streamed to browser MP3 playback. |
 | Realtime STT / VAD | Not yet | Reserved in the protocol, intentionally out of MVP scope. |
 
 ## Architecture
@@ -74,17 +74,17 @@ Most voice AI demos are tightly coupled to one vendor API or hide the hard parts
 ```text
 apps/web
   Next.js App Router client
-  text input or push-to-talk audio -> WebSocket -> transcript/streaming display
+  text input or push-to-talk audio -> WebSocket -> transcript/streaming display and audio playback
 
 apps/gateway
   Node.js ws server
-  audio aggregation -> STT -> session history -> OpenAI-compatible LLM -> streamed deltas
+  audio aggregation -> STT -> session history -> OpenAI-compatible LLM -> streamed deltas -> TTS chunks
 
 packages/protocol
   shared WebSocket message types
 
 packages/adapters
-  provider interfaces and OpenAI-compatible LLM adapter
+  provider interfaces and OpenAI-compatible LLM, STT, and TTS adapters
 ```
 
 ```mermaid
@@ -94,7 +94,9 @@ flowchart LR
   STT -->|transcript.final| Gateway
   Gateway -->|session history| LLM["LLM Provider<br/>OpenAI-compatible"]
   LLM -->|llm.delta stream| Gateway
-  Gateway -->|transcript.final / llm.delta / llm.done| Web
+  Gateway -->|assistant text segments| TTS["TTS Provider<br/>OpenAI-compatible"]
+  TTS -->|audio/mpeg chunks| Gateway
+  Gateway -->|transcript.final / llm.delta / llm.done / tts.chunk| Web
 ```
 
 ## Repository Layout
@@ -144,11 +146,17 @@ OPENAI_MODEL=gpt-4o-mini
 STT_API_KEY=
 STT_BASE_URL=
 STT_MODEL=whisper-1
+TTS_API_KEY=
+TTS_BASE_URL=
+TTS_MODEL=tts-1
+TTS_VOICE=alloy
+TTS_FORMAT=mp3
 GATEWAY_PORT=8787
 NEXT_PUBLIC_GATEWAY_WS_URL=ws://localhost:8787
 ```
 
 `STT_API_KEY` and `STT_BASE_URL` are optional. If they are empty, the gateway reuses `OPENAI_API_KEY` and `OPENAI_BASE_URL`. `STT_MODEL` defaults to `whisper-1`.
+`TTS_API_KEY` and `TTS_BASE_URL` are optional. If they are empty, the gateway reuses `OPENAI_API_KEY` and `OPENAI_BASE_URL`. Leave both `TTS_API_KEY` and `OPENAI_API_KEY` empty to run in text-only mode.
 
 Start the web app and gateway together:
 
@@ -172,6 +180,11 @@ http://localhost:3000
 | `STT_API_KEY` | No | Optional separate API key for STT. Falls back to `OPENAI_API_KEY`. |
 | `STT_BASE_URL` | No | Optional separate base URL for STT. Falls back to `OPENAI_BASE_URL`. |
 | `STT_MODEL` | No | Defaults to `whisper-1`. |
+| `TTS_API_KEY` | No | Optional separate API key for TTS. Falls back to `OPENAI_API_KEY`; if no key is available, TTS is disabled. |
+| `TTS_BASE_URL` | No | Optional separate base URL for TTS. Falls back to `OPENAI_BASE_URL`. |
+| `TTS_MODEL` | No | Defaults to `tts-1`. |
+| `TTS_VOICE` | No | Defaults to `alloy`. |
+| `TTS_FORMAT` | No | Defaults to `mp3`; browser playback expects `audio/mpeg`. |
 | `GATEWAY_PORT` | No | Defaults to `8787`. |
 | `NEXT_PUBLIC_GATEWAY_WS_URL` | No | Defaults to `ws://localhost:8787`. |
 
@@ -181,12 +194,13 @@ http://localhost:3000
 2. Confirm the page shows `Connected`.
 3. Type a message and click `Send`.
 4. Confirm the assistant response appears incrementally.
-5. Send a second text message and confirm the answer can refer to the previous turn.
-6. Hold `Hold to Talk`, say a short phrase, then release.
-7. Confirm the transcript appears as a user message, then the assistant streams a reply.
-8. Deny microphone permission in the browser and confirm text input still works.
-9. While a response is streaming, click `Stop`.
-10. Confirm streaming stops immediately.
+5. If TTS is configured, confirm the response also plays as audio. If the browser blocks autoplay, click `播放语音回复`.
+6. Send a second text message and confirm the answer can refer to the previous turn.
+7. Hold `Hold to Talk`, say a short phrase, then release.
+8. Confirm the transcript appears as a user message, then the assistant streams a reply.
+9. Deny microphone permission in the browser and confirm text input still works.
+10. While a response is streaming or playing, click `Stop`.
+11. Confirm streaming and playback stop immediately.
 
 ## Protocol
 
@@ -200,9 +214,13 @@ The WebSocket protocol is documented in [docs/protocol.md](docs/protocol.md). Th
 | `transcript.final` | gateway -> client | Return final STT text for an audio turn. |
 | `llm.delta` | gateway -> client | Stream assistant text chunks. |
 | `llm.done` | gateway -> client | Mark completion, interruption, or error. |
+| `tts.start` | gateway -> client | Start a generated speech stream. |
+| `tts.chunk` | gateway -> client | Stream generated speech as base64 MP3 chunks. |
+| `tts.end` | gateway -> client | Mark generated speech completion, interruption, or error. |
+| `playback.ack` | client -> gateway | Acknowledge played TTS chunks. |
 | `interrupt` | client -> gateway | Abort the active LLM stream. |
 
-Reserved future events include `transcript.partial` and `tts.chunk`.
+Reserved future events include `transcript.partial`.
 
 ## Development Commands
 
@@ -246,14 +264,14 @@ realtime voice layer
   -> tools, memory, search, and agent workflows
 ```
 
-The current milestone keeps the surface deliberately small so the protocol, whole-turn transcription, streaming, context handling, and interruption semantics are correct before TTS and realtime audio features are added.
+The current milestone keeps the surface deliberately small so the protocol, whole-turn transcription, streaming, TTS playback, context handling, and interruption semantics are correct before realtime audio features are added.
 
 Near-term roadmap:
 
 - [x] Text loop over WebSocket.
 - [x] Push-to-talk recording and whole-turn STT.
-- [ ] TTS provider and browser playback.
-- [ ] Clearer response interruption state machine.
+- [x] TTS provider and browser playback.
+- [x] Clearer response interruption state machine.
 - [ ] Tool registry and simple function calls.
 - [ ] Persistent memory adapter.
 - [ ] Realtime STT and partial transcript events.
