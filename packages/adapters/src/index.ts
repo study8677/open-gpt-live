@@ -13,6 +13,12 @@ export interface ProviderCallOptions {
   signal?: AbortSignal;
 }
 
+export interface STTAudioInput {
+  data: Uint8Array;
+  mimeType: string;
+  filename?: string;
+}
+
 export interface LLMProvider {
   streamText(
     messages: LLMMessage[],
@@ -21,7 +27,7 @@ export interface LLMProvider {
 }
 
 export interface STTProvider {
-  transcribe(input: unknown, options?: ProviderCallOptions): Promise<{
+  transcribe(input: STTAudioInput, options?: ProviderCallOptions): Promise<{
     text: string;
   }>;
 }
@@ -31,6 +37,12 @@ export interface TTSProvider {
 }
 
 export interface OpenAILLMProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+}
+
+export interface OpenAIWhisperProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
@@ -50,11 +62,13 @@ export class OpenAILLMProvider implements LLMProvider {
   private readonly model: string;
 
   constructor(config: OpenAILLMProviderConfig = {}) {
-    this.apiKey = config.apiKey ?? process.env.OPENAI_API_KEY ?? "";
+    this.apiKey = firstNonEmpty(config.apiKey, process.env.OPENAI_API_KEY) ?? "";
     this.baseUrl = stripTrailingSlash(
-      config.baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1"
+      firstNonEmpty(config.baseUrl, process.env.OPENAI_BASE_URL) ??
+        "https://api.openai.com/v1"
     );
-    this.model = config.model ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+    this.model =
+      firstNonEmpty(config.model, process.env.OPENAI_MODEL) ?? "gpt-4o-mini";
   }
 
   async *streamText(
@@ -128,8 +142,89 @@ export class OpenAILLMProvider implements LLMProvider {
   }
 }
 
+export class OpenAIWhisperProvider implements STTProvider {
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly model: string;
+
+  constructor(config: OpenAIWhisperProviderConfig = {}) {
+    this.apiKey = firstNonEmpty(
+      config.apiKey,
+      process.env.STT_API_KEY,
+      process.env.OPENAI_API_KEY
+    ) ?? "";
+    this.baseUrl = stripTrailingSlash(
+      firstNonEmpty(
+        config.baseUrl,
+        process.env.STT_BASE_URL,
+        process.env.OPENAI_BASE_URL
+      ) ??
+        "https://api.openai.com/v1"
+    );
+    this.model = firstNonEmpty(config.model, process.env.STT_MODEL) ?? "whisper-1";
+  }
+
+  async transcribe(
+    input: STTAudioInput,
+    options: ProviderCallOptions = {}
+  ): Promise<{ text: string }> {
+    if (!this.apiKey) {
+      throw new Error("STT_API_KEY or OPENAI_API_KEY is required");
+    }
+
+    const formData = new FormData();
+    formData.append("model", this.model);
+    formData.append(
+      "file",
+      new Blob([input.data], { type: input.mimeType }),
+      input.filename ?? filenameForMimeType(input.mimeType)
+    );
+
+    const response = await fetch(`${this.baseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`
+      },
+      body: formData,
+      signal: options.signal
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`OpenAI-compatible STT API error ${response.status}: ${body}`);
+    }
+
+    const parsed = (await response.json()) as { text?: unknown };
+    if (typeof parsed.text !== "string") {
+      throw new Error("OpenAI-compatible STT API returned no text");
+    }
+
+    return { text: parsed.text };
+  }
+}
+
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  return values.find((value) => value !== undefined && value.trim().length > 0);
+}
+
+function filenameForMimeType(mimeType: string): string {
+  if (mimeType.includes("webm")) {
+    return "recording.webm";
+  }
+  if (mimeType.includes("mp4")) {
+    return "recording.mp4";
+  }
+  if (mimeType.includes("mpeg")) {
+    return "recording.mp3";
+  }
+  if (mimeType.includes("wav")) {
+    return "recording.wav";
+  }
+  return "recording.webm";
 }
 
 function readSseDataLines(event: string): string[] {

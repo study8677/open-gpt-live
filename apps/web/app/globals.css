@@ -108,15 +108,31 @@ button:disabled {
 }
 
 .message strong {
-  display: block;
+  display: inline-block;
   font-size: 13px;
   margin-bottom: 6px;
+}
+
+.message span {
+  color: #666;
+  display: inline-block;
+  font-size: 12px;
+  margin-left: 8px;
 }
 
 .message p {
   line-height: 1.5;
   margin: 0;
   white-space: pre-wrap;
+}
+
+.notice {
+  background: #f2f7ff;
+  border: 1px solid #b8cbea;
+  border-radius: 8px;
+  color: #264c7d;
+  margin: 0;
+  padding: 10px 12px;
 }
 
 .error {
@@ -131,7 +147,7 @@ button:disabled {
 .composer {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
 }
 
 .composer input {
@@ -152,6 +168,12 @@ button:disabled {
 .composer .secondary {
   background: #fff;
   color: #191919;
+}
+
+.composer .recording {
+  background: #a22;
+  border-color: #a22;
+  color: #fff;
 }
 
 @media (max-width: 640px) {

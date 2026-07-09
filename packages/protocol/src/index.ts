@@ -29,6 +29,15 @@ export interface UserTextMessage {
   text: string;
 }
 
+export interface AudioChunkMessage {
+  type: typeof WS_EVENTS.AUDIO_CHUNK;
+  requestId: string;
+  chunk?: string;
+  mimeType: string;
+  sequence: number;
+  isFinal?: boolean;
+}
+
 export interface InterruptMessage {
   type: typeof WS_EVENTS.INTERRUPT;
   requestId?: string;
@@ -47,31 +56,27 @@ export interface LlmDoneMessage {
   reason: "stop" | "interrupted" | "error";
 }
 
+export interface TranscriptFinalMessage {
+  type: typeof WS_EVENTS.TRANSCRIPT_FINAL;
+  requestId: string;
+  text: string;
+}
+
 export interface ErrorMessage {
   type: "error";
   requestId?: string;
   message: string;
 }
 
-export interface ReservedAudioChunkMessage {
-  type: typeof WS_EVENTS.AUDIO_CHUNK;
-  sessionId: string;
-  chunk: string;
-  encoding: string;
-}
-
 export interface ReservedTranscriptPartialMessage {
   type: typeof WS_EVENTS.TRANSCRIPT_PARTIAL;
-  text: string;
-}
-
-export interface ReservedTranscriptFinalMessage {
-  type: typeof WS_EVENTS.TRANSCRIPT_FINAL;
+  requestId: string;
   text: string;
 }
 
 export interface ReservedTtsChunkMessage {
   type: typeof WS_EVENTS.TTS_CHUNK;
+  requestId: string;
   chunk: string;
   encoding: string;
 }
@@ -79,18 +84,18 @@ export interface ReservedTtsChunkMessage {
 export type ClientMessage =
   | ClientSessionStartMessage
   | UserTextMessage
+  | AudioChunkMessage
   | InterruptMessage;
 
 export type ServerMessage =
   | ServerSessionStartMessage
   | LlmDeltaMessage
   | LlmDoneMessage
+  | TranscriptFinalMessage
   | ErrorMessage;
 
 export type ReservedMessage =
-  | ReservedAudioChunkMessage
   | ReservedTranscriptPartialMessage
-  | ReservedTranscriptFinalMessage
   | ReservedTtsChunkMessage;
 
 export function createRequestId(): string {

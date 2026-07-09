@@ -2,13 +2,14 @@
 
 OpenGPT Live uses a JSON WebSocket protocol between the browser client and the Voice Session Gateway.
 
-This MVP implements a text-only loop:
+This MVP implements text input plus push-to-talk audio input:
 
 ```text
 browser text input -> WebSocket -> gateway -> LLM stream -> WebSocket -> browser token display
+browser audio chunks -> WebSocket -> gateway -> STT -> user text -> LLM stream
 ```
 
-No audio, microphone, transcription, or text-to-speech runtime is implemented in this milestone. Audio-related events are reserved so future versions can extend the protocol without changing the text loop.
+The current audio path records a whole push-to-talk turn, aggregates MediaRecorder chunks in the gateway, transcribes the complete audio file once, and then submits the transcript into the same user text flow. It does not implement VAD, realtime transcription, TTS, or audio playback.
 
 ## Connection
 
@@ -84,6 +85,60 @@ Gateway behavior:
 - Streams response chunks back as `llm.delta`.
 - Appends the complete assistant response to session history after normal completion.
 
+### `audio.chunk`
+
+Direction: client -> gateway
+
+Sends one MediaRecorder chunk for the current push-to-talk turn. The browser should send chunks as base64 strings and mark the turn complete with a final message after `MediaRecorder.stop()` has emitted its last `dataavailable` event.
+
+```json
+{
+  "type": "audio.chunk",
+  "requestId": "request-uuid",
+  "chunk": "base64-encoded-webm-opus-data",
+  "mimeType": "audio/webm;codecs=opus",
+  "sequence": 0,
+  "isFinal": false
+}
+```
+
+Final message:
+
+```json
+{
+  "type": "audio.chunk",
+  "requestId": "request-uuid",
+  "mimeType": "audio/webm;codecs=opus",
+  "sequence": 5,
+  "isFinal": true
+}
+```
+
+Gateway behavior:
+
+- Aggregates chunks by `requestId`.
+- Rejects turns larger than 25 MB before calling STT.
+- Transcribes the full turn with the configured STT provider after `isFinal: true`.
+- Sends `transcript.final`.
+- Appends the transcript to in-memory session history as a user message.
+- Streams the assistant response through `llm.delta`.
+
+### `transcript.final`
+
+Direction: gateway -> client
+
+Sends the final speech-to-text result for an audio turn.
+
+```json
+{
+  "type": "transcript.final",
+  "requestId": "request-uuid",
+  "text": "What time is it now?"
+}
+```
+
+The client should render this as the user message for the same `requestId`.
+
 ### `llm.delta`
 
 Direction: gateway -> client
@@ -143,20 +198,7 @@ Gateway behavior:
 
 ## Reserved Events
 
-These events are part of the protocol namespace but are not implemented in the text-loop MVP.
-
-### `audio.chunk`
-
-Reserved for browser or gateway audio chunks.
-
-```json
-{
-  "type": "audio.chunk",
-  "sessionId": "session-id",
-  "chunk": "base64-encoded-audio",
-  "encoding": "pcm16"
-}
-```
+These events are part of the protocol namespace but are not implemented in this MVP.
 
 ### `transcript.partial`
 
@@ -165,18 +207,8 @@ Reserved for partial speech-to-text results.
 ```json
 {
   "type": "transcript.partial",
+  "requestId": "request-uuid",
   "text": "partial transcript"
-}
-```
-
-### `transcript.final`
-
-Reserved for final speech-to-text results.
-
-```json
-{
-  "type": "transcript.final",
-  "text": "final transcript"
 }
 ```
 
@@ -187,6 +219,7 @@ Reserved for generated speech chunks.
 ```json
 {
   "type": "tts.chunk",
+  "requestId": "request-uuid",
   "chunk": "base64-encoded-audio",
   "encoding": "pcm16"
 }

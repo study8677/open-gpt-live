@@ -2,20 +2,20 @@
 
 OpenGPT Live is an open-source realtime interface framework for GPT-style AI assistants backed by large language models.
 
-This repository currently contains the first MVP: a text-only WebSocket loop that proves the browser can talk to a gateway, the gateway can stream from an OpenAI-compatible LLM, and the browser can render the response incrementally.
+This repository currently contains the first MVP: a text and push-to-talk WebSocket loop that proves the browser can talk to a gateway, the gateway can transcribe recorded audio with an OpenAI-compatible Whisper API, stream from an OpenAI-compatible LLM, and the browser can render the transcript and response incrementally.
 
-Audio, microphone capture, transcription, and text-to-speech are intentionally not implemented in this milestone.
+Text-to-speech, voice playback, VAD, automatic sentence detection, and realtime streaming transcription are intentionally not implemented in this milestone.
 
 ## Architecture
 
 ```text
 apps/web
   Next.js App Router client
-  text input -> WebSocket -> streaming display
+  text input or push-to-talk audio -> WebSocket -> transcript/streaming display
 
 apps/gateway
   Node.js ws server
-  session history -> OpenAI-compatible LLM -> streamed deltas
+  audio aggregation -> STT -> session history -> OpenAI-compatible LLM -> streamed deltas
 
 packages/protocol
   shared WebSocket message types
@@ -50,9 +50,14 @@ Edit `.env`:
 OPENAI_API_KEY=sk-your-api-key
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
+STT_API_KEY=
+STT_BASE_URL=
+STT_MODEL=whisper-1
 GATEWAY_PORT=8787
 NEXT_PUBLIC_GATEWAY_WS_URL=ws://localhost:8787
 ```
+
+`STT_API_KEY` and `STT_BASE_URL` are optional. If they are empty, the gateway reuses `OPENAI_API_KEY` and `OPENAI_BASE_URL`. `STT_MODEL` defaults to `whisper-1`.
 
 Start the web app and gateway together:
 
@@ -72,9 +77,12 @@ http://localhost:3000
 2. Confirm the page shows `Connected`.
 3. Type a message and click `Send`.
 4. Confirm the assistant response appears incrementally.
-5. Send a second message and confirm the answer can refer to the previous turn.
-6. While a response is streaming, click `Stop`.
-7. Confirm streaming stops immediately.
+5. Send a second text message and confirm the answer can refer to the previous turn.
+6. Hold `Hold to Talk`, say a short phrase, then release.
+7. Confirm the transcript appears as a user message, then the assistant streams a reply.
+8. Deny microphone permission in the browser and confirm text input still works.
+9. While a response is streaming, click `Stop`.
+10. Confirm streaming stops immediately.
 
 ## Protocol
 
@@ -84,15 +92,15 @@ Implemented events:
 
 - `session.start`
 - `user.text`
+- `audio.chunk`
 - `llm.delta`
 - `llm.done`
 - `interrupt`
+- `transcript.final`
 
 Reserved future events:
 
-- `audio.chunk`
 - `transcript.partial`
-- `transcript.final`
 - `tts.chunk`
 
 ## Development Commands
@@ -120,7 +128,7 @@ realtime voice layer
   -> tools, memory, search, and agent workflows
 ```
 
-The current milestone keeps the surface deliberately small so the protocol, streaming, context handling, and interruption semantics are correct before audio is added.
+The current milestone keeps the surface deliberately small so the protocol, whole-turn transcription, streaming, context handling, and interruption semantics are correct before TTS and realtime audio features are added.
 
 ## License
 
