@@ -1,0 +1,38 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">OpenGPT Live logo</title>
+  <desc id="desc">A realtime voice AI logo combining chat brackets, a live audio waveform, and network nodes.</desc>
+  <defs>
+    <linearGradient id="leftMark" x1="185" y1="244" x2="512" y2="819" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1821"/>
+      <stop offset="1" stop-color="#182D37"/>
+    </linearGradient>
+    <linearGradient id="rightMark" x1="512" y1="199" x2="839" y2="819" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#02B8F4"/>
+      <stop offset="0.55" stop-color="#10C59B"/>
+      <stop offset="1" stop-color="#39D02F"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="316" y1="515" x2="715" y2="515" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#02AEEA"/>
+      <stop offset="0.5" stop-color="#11C88D"/>
+      <stop offset="1" stop-color="#F6A500"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="220" fill="#F8FBFC"/>
+  <path d="M377 272H286C243.474 272 209 306.474 209 349V455H161V569H209V675C209 717.526 243.474 752 286 752H377V694H294C277.431 694 264 680.569 264 664V560H326V506H264V360C264 343.431 277.431 330 294 330H377V272Z" fill="url(#leftMark)"/>
+  <path d="M647 272H738C780.526 272 815 306.474 815 349V455H863V569H815V675C815 717.526 780.526 752 738 752H647V694H730C746.569 694 760 680.569 760 664V560H698V506H760V360C760 343.431 746.569 330 730 330H647V272Z" fill="url(#rightMark)"/>
+  <path d="M308 277L474 168" stroke="url(#leftMark)" stroke-width="26" stroke-linecap="round"/>
+  <path d="M550 168L716 277" stroke="#02B8F4" stroke-width="26" stroke-linecap="round"/>
+  <path d="M308 747L474 856" stroke="url(#leftMark)" stroke-width="26" stroke-linecap="round"/>
+  <path d="M550 856L716 747" stroke="#25C946" stroke-width="26" stroke-linecap="round"/>
+  <circle cx="512" cy="164" r="43" fill="#F8FBFC" stroke="#05B8EE" stroke-width="30"/>
+  <circle cx="512" cy="860" r="43" fill="#F8FBFC" stroke="#2FCC3B" stroke-width="30"/>
+  <circle cx="161" cy="512" r="43" fill="#F8FBFC" stroke="#0D1B25" stroke-width="30"/>
+  <circle cx="863" cy="512" r="43" fill="#F8FBFC" stroke="#1FC949" stroke-width="30"/>
+  <rect x="322" y="487" width="23" height="50" rx="11.5" fill="url(#wave)"/>
+  <rect x="364" y="458" width="28" height="108" rx="14" fill="url(#wave)"/>
+  <rect x="415" y="430" width="33" height="164" rx="16.5" fill="url(#wave)"/>
+  <rect x="474" y="371" width="38" height="282" rx="19" fill="url(#wave)"/>
+  <rect x="548" y="424" width="33" height="176" rx="16.5" fill="url(#wave)"/>
+  <rect x="635" y="463" width="28" height="98" rx="14" fill="url(#wave)"/>
+  <rect x="691" y="489" width="23" height="46" rx="11.5" fill="url(#wave)"/>
+</svg>
