@@ -1,4 +1,10 @@
 <p align="center">
+  English
+  ·
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <img src="assets/brand/logo.svg" alt="OpenGPT Live logo" width="160" />
 </p>
 
