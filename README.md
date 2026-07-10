@@ -17,11 +17,13 @@
 </p>
 
 <p align="center">
-  <a href="#quickstart">Quickstart</a> ·
+  <a href="#5-minute-quickstart">Quickstart</a> ·
   <a href="docs/protocol.md">Protocol</a> ·
   <a href="docs/configuration.md">Configuration</a> ·
   <a href="docs/deployment.md">Deployment</a> ·
-  <a href="TODO.md">Roadmap</a>
+  <a href="TODO.md">Roadmap</a> ·
+  <a href="https://github.com/study8677/open-gpt-live/discussions">Discussions</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
 <p align="center">
@@ -43,7 +45,7 @@ open your mic
   → start speaking to interrupt it
 ```
 
-OpenGPT Live is a runnable reference implementation for the session layer between browser audio and GPT-style model infrastructure. It keeps the realtime engineering visible instead of hiding it behind a vendor-only client SDK.
+OpenGPT Live is a self-hostable realtime voice AI reference implementation for the session layer between browser audio and GPT-style model infrastructure. It keeps streaming STT, browser VAD, interruptible TTS, and WebSocket turn orchestration visible instead of hiding them behind a vendor-only client SDK.
 
 ## What works today
 
@@ -58,6 +60,16 @@ OpenGPT Live is a runnable reference implementation for the session layer betwee
 | Streaming STT | Experimental | OpenAI Realtime transcription with incremental deltas and batch WAV fallback. |
 | Quality baseline | Stable | Runtime protocol validation, automated integration tests, CI, and production builds. |
 
+## Provider compatibility
+
+| Layer | Current verified path | Maturity |
+| --- | --- | --- |
+| LLM | OpenAI-compatible Chat Completions | Stable |
+| Batch STT | OpenAI-compatible transcription API | Stable |
+| Streaming STT | OpenAI Realtime transcription | Experimental |
+| TTS | OpenAI-compatible speech API | Stable |
+| Local AI | Ollama + open-source STT/TTS profile | Planned for v0.3 |
+
 ## Why this project
 
 - **Open protocol** — browser and Gateway behavior is described by shared TypeScript events, not an opaque transport.
@@ -65,7 +77,7 @@ OpenGPT Live is a runnable reference implementation for the session layer betwee
 - **Observable turns** — partial transcript, final transcript, text delta, audio chunk, completion, interruption, and error are explicit events.
 - **Honest boundaries** — this repository is a voice-session reference implementation, not a hosted assistant or billing platform.
 
-## Quickstart
+## 5-minute quickstart
 
 Requirements: Node.js 22.13+ and pnpm 11+.
 
@@ -169,7 +181,7 @@ These constraints are intentional. The next product layer should be built on a v
 
 ## Contributing
 
-Run `pnpm check` before opening a pull request. Protocol or turn-lifecycle changes should include a regression test and keep the documentation aligned with the actual event order.
+Read [CONTRIBUTING.md](CONTRIBUTING.md), then run `pnpm check` before opening a pull request. Protocol or turn-lifecycle changes should include a regression test and keep the documentation aligned with the actual event order. Provider requests and device compatibility reports are welcome in [Discussions](https://github.com/study8677/open-gpt-live/discussions).
 
 ## License
 

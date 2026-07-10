@@ -1,0 +1,64 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">OpenGPT Live social preview</title>
+  <desc id="desc">OpenGPT Live realtime voice AI project preview with streaming speech capabilities.</desc>
+  <defs>
+    <linearGradient id="background" x1="60" y1="20" x2="1220" y2="620" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07141D"/>
+      <stop offset="0.55" stop-color="#102A34"/>
+      <stop offset="1" stop-color="#123C35"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(1020 60) rotate(128) scale(650 720)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10C59B" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#10C59B" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="470" y1="0" x2="1080" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#02B8F4"/>
+      <stop offset="0.55" stop-color="#10C59B"/>
+      <stop offset="1" stop-color="#75DE55"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" rx="36" fill="url(#background)"/>
+  <rect width="1280" height="640" rx="36" fill="url(#glow)"/>
+  <path d="M0 518C210 440 320 606 548 532C812 446 970 532 1280 416V640H0V518Z" fill="#061016" fill-opacity="0.34"/>
+
+  <rect x="82" y="112" width="328" height="328" rx="86" fill="#F8FBFC"/>
+  <g transform="translate(82 112) scale(0.3203125)">
+    <path d="M377 272H286C243.474 272 209 306.474 209 349V455H161V569H209V675C209 717.526 243.474 752 286 752H377V694H294C277.431 694 264 680.569 264 664V560H326V506H264V360C264 343.431 277.431 330 294 330H377V272Z" fill="#0D1B25"/>
+    <path d="M647 272H738C780.526 272 815 306.474 815 349V455H863V569H815V675C815 717.526 780.526 752 738 752H647V694H730C746.569 694 760 680.569 760 664V560H698V506H760V360C760 343.431 746.569 330 730 330H647V272Z" fill="#13C59A"/>
+    <path d="M308 277L474 168" stroke="#0D1B25" stroke-width="26" stroke-linecap="round"/>
+    <path d="M550 168L716 277" stroke="#02B8F4" stroke-width="26" stroke-linecap="round"/>
+    <path d="M308 747L474 856" stroke="#0D1B25" stroke-width="26" stroke-linecap="round"/>
+    <path d="M550 856L716 747" stroke="#25C946" stroke-width="26" stroke-linecap="round"/>
+    <circle cx="512" cy="164" r="43" fill="#F8FBFC" stroke="#05B8EE" stroke-width="30"/>
+    <circle cx="512" cy="860" r="43" fill="#F8FBFC" stroke="#2FCC3B" stroke-width="30"/>
+    <circle cx="161" cy="512" r="43" fill="#F8FBFC" stroke="#0D1B25" stroke-width="30"/>
+    <circle cx="863" cy="512" r="43" fill="#F8FBFC" stroke="#1FC949" stroke-width="30"/>
+    <rect x="322" y="487" width="23" height="50" rx="11.5" fill="#02B8F4"/>
+    <rect x="364" y="458" width="28" height="108" rx="14" fill="#04BDE5"/>
+    <rect x="415" y="430" width="33" height="164" rx="16.5" fill="#08C5B0"/>
+    <rect x="474" y="371" width="38" height="282" rx="19" fill="#10C98C"/>
+    <rect x="548" y="424" width="33" height="176" rx="16.5" fill="#4FD451"/>
+    <rect x="635" y="463" width="28" height="98" rx="14" fill="#B6D529"/>
+    <rect x="691" y="489" width="23" height="46" rx="11.5" fill="#F6A500"/>
+  </g>
+
+  <rect x="472" y="115" width="92" height="7" rx="3.5" fill="url(#accent)"/>
+  <text x="472" y="208" fill="#F7FBFC" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="74" font-weight="750" letter-spacing="-2">OpenGPT Live</text>
+  <text x="472" y="272" fill="#B9C9CE" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="30" font-weight="450">Realtime voice AI you can inspect, run, and replace.</text>
+
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22" font-weight="650">
+    <rect x="472" y="322" width="188" height="58" rx="29" fill="#0D3341" stroke="#02B8F4" stroke-opacity="0.7"/>
+    <text x="507" y="359" fill="#D8F5FF">Streaming STT</text>
+    <rect x="676" y="322" width="174" height="58" rx="29" fill="#103B35" stroke="#10C59B" stroke-opacity="0.75"/>
+    <text x="713" y="359" fill="#D8FFF4">Browser VAD</text>
+    <rect x="866" y="322" width="214" height="58" rx="29" fill="#20382B" stroke="#75DE55" stroke-opacity="0.7"/>
+    <text x="899" y="359" fill="#E8FFE0">Interruptible TTS</text>
+  </g>
+
+  <text x="472" y="446" fill="#82969D" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="23" font-weight="550" letter-spacing="1.2">TYPESCRIPT · WEBSOCKET · SELF-HOSTED</text>
+  <text x="82" y="554" fill="#95A8AE" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22">github.com/study8677/open-gpt-live</text>
+  <circle cx="1154" cy="545" r="5" fill="#02B8F4"/>
+  <circle cx="1176" cy="545" r="5" fill="#10C59B"/>
+  <circle cx="1198" cy="545" r="5" fill="#75DE55"/>
+</svg>

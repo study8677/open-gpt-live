@@ -1,0 +1,102 @@
+name: Provider integration
+description: Propose a new LLM, STT, streaming STT, or TTS adapter
+title: "[Provider]: "
+labels:
+  - enhancement
+  - provider:integration
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provider integrations must preserve the project protocol and session lifecycle. Read `CONTRIBUTING.md` before proposing an adapter.
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider or project
+      placeholder: Provider name and model/runtime
+    validations:
+      required: true
+
+  - type: input
+    id: docs
+    attributes:
+      label: API documentation
+      placeholder: https://...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: surfaces
+    attributes:
+      label: Adapter surfaces
+      options:
+        - label: LLM — streamed text generation
+        - label: STT — complete-turn transcription
+        - label: Streaming STT — incremental bidirectional transcription
+        - label: TTS — speech synthesis
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hosting
+    attributes:
+      label: Hosting model
+      options:
+        - Local / self-hosted
+        - Cloud API
+        - Both local and cloud
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Protocol and media compatibility
+      description: List endpoints, streaming transport, audio formats, sample rates, channels, and known limits.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design
+    attributes:
+      label: Adapter design
+      description: Explain which existing provider interface is implemented and how output maps to current Gateway semantics.
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration
+      description: List proposed environment variable names without including real keys.
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Offline test strategy
+      description: Explain how CI can verify requests, streaming, cancellation, errors, and cleanup without network access or paid credentials.
+    validations:
+      required: true
+
+  - type: textarea
+    id: license
+    attributes:
+      label: License, privacy, and data flow
+      description: Include SDK/model licenses and whether audio or transcripts leave the user's machine.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Contribution readiness
+      options:
+        - label: I will honor `AbortSignal` and close resources on interruption.
+          required: true
+        - label: I will keep credentials out of logs, tests, and fixtures.
+          required: true
+        - label: I will add deterministic tests and configuration documentation.
+          required: true
+        - label: I will not expose vendor-specific events directly to the browser protocol.
+          required: true

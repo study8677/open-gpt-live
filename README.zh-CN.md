@@ -17,11 +17,13 @@
 </p>
 
 <p align="center">
-  <a href="#快速开始">快速开始</a> ·
+  <a href="#5-分钟快速开始">快速开始</a> ·
   <a href="docs/protocol.md">协议</a> ·
   <a href="docs/configuration.md">配置</a> ·
   <a href="docs/deployment.md">部署</a> ·
-  <a href="TODO.md">路线图</a>
+  <a href="TODO.md">路线图</a> ·
+  <a href="https://github.com/study8677/open-gpt-live/discussions">讨论区</a> ·
+  <a href="CONTRIBUTING.md">参与贡献</a>
 </p>
 
 <p align="center">
@@ -43,7 +45,7 @@
   → 再次开口，立即打断
 ```
 
-OpenGPT Live 是浏览器语音体验与 GPT 风格模型基础设施之间的一份可运行参考实现。它没有用封闭 SDK 隐藏实时链路，而是把会话、语音轮次、中断和音频事件完整暴露出来。
+OpenGPT Live 是一份可自托管的实时语音 AI 参考实现，位于浏览器音频与 GPT 风格模型基础设施之间。它没有用封闭 SDK 隐藏实时链路，而是把流式 STT、浏览器 VAD、可打断 TTS、会话和音频事件完整暴露出来。
 
 ## 当前真正可用的能力
 
@@ -58,6 +60,16 @@ OpenGPT Live 是浏览器语音体验与 GPT 风格模型基础设施之间的�
 | 流式语音转写 | 实验性 | OpenAI Realtime 增量转写，失败后自动回退到批式 WAV 转写。 |
 | 工程基线 | 稳定 | 运行时协议校验、自动化测试、CI 和生产构建。 |
 
+## Provider 兼容性
+
+| 层 | 当前已验证路径 | 成熟度 |
+| --- | --- | --- |
+| LLM | OpenAI-compatible Chat Completions | 稳定 |
+| 批式 STT | OpenAI-compatible transcription API | 稳定 |
+| 流式 STT | OpenAI Realtime transcription | 实验性 |
+| TTS | OpenAI-compatible speech API | 稳定 |
+| 本地 AI | Ollama + 开源 STT/TTS profile | v0.3 计划中 |
+
 ## 为什么值得做
 
 - **协议开放**：浏览器和 Gateway 的行为由共享 TypeScript 事件描述，不依赖黑盒传输层。
@@ -65,7 +77,7 @@ OpenGPT Live 是浏览器语音体验与 GPT 风格模型基础设施之间的�
 - **过程可观察**：临时转写、最终转写、文字增量、音频分块、完成、中断和错误都有明确事件。
 - **边界诚实**：这是语音会话层参考实现，不是托管助手、计费平台或万能 Agent 框架。
 
-## 快速开始
+## 5 分钟快速开始
 
 需要 Node.js 22.13+ 和 pnpm 11+。
 
@@ -169,7 +181,7 @@ GitHub Actions 会在每次推送和 Pull Request 中执行类型检查、测试
 
 ## 参与贡献
 
-提交 PR 前请运行 `pnpm check`。修改协议或语音轮次生命周期时，应同时增加回归测试，并保证文档描述与真实事件顺序一致。
+请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，提交 PR 前运行 `pnpm check`。修改协议或语音轮次生命周期时，应同时增加回归测试，并保证文档描述与真实事件顺序一致。Provider 需求和设备兼容性报告可以发到 [Discussions](https://github.com/study8677/open-gpt-live/discussions)。
 
 ## License
 
