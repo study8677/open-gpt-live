@@ -5,6 +5,8 @@ export const WS_EVENTS = {
   LLM_DONE: "llm.done",
   INTERRUPT: "interrupt",
   AUDIO_CHUNK: "audio.chunk",
+  VAD_SPEECH_START: "vad.speech_start",
+  VAD_SPEECH_END: "vad.speech_end",
   TRANSCRIPT_PARTIAL: "transcript.partial",
   TRANSCRIPT_FINAL: "transcript.final",
   TTS_START: "tts.start",
@@ -39,6 +41,23 @@ export interface AudioChunkMessage {
   mimeType: string;
   sequence: number;
   isFinal?: boolean;
+  turnMode?: "ptt" | "live";
+}
+
+export interface VadSpeechStartMessage {
+  type: typeof WS_EVENTS.VAD_SPEECH_START;
+  requestId: string;
+  turnMode: "live";
+  startedAt: number;
+  rms?: number;
+}
+
+export interface VadSpeechEndMessage {
+  type: typeof WS_EVENTS.VAD_SPEECH_END;
+  requestId: string;
+  endedAt: number;
+  durationMs?: number;
+  reason: "silence" | "manual" | "cancelled";
 }
 
 export interface InterruptMessage {
@@ -71,6 +90,14 @@ export interface TranscriptFinalMessage {
   text: string;
 }
 
+export interface TranscriptPartialMessage {
+  type: typeof WS_EVENTS.TRANSCRIPT_PARTIAL;
+  requestId: string;
+  text: string;
+  sequence: number;
+  isStable?: boolean;
+}
+
 export interface ErrorMessage {
   type: "error";
   requestId?: string;
@@ -101,16 +128,12 @@ export interface TtsEndMessage {
   reason: "stop" | "interrupted" | "error";
 }
 
-export interface ReservedTranscriptPartialMessage {
-  type: typeof WS_EVENTS.TRANSCRIPT_PARTIAL;
-  requestId: string;
-  text: string;
-}
-
 export type ClientMessage =
   | ClientSessionStartMessage
   | UserTextMessage
   | AudioChunkMessage
+  | VadSpeechStartMessage
+  | VadSpeechEndMessage
   | InterruptMessage
   | PlaybackAckMessage;
 
@@ -118,13 +141,14 @@ export type ServerMessage =
   | ServerSessionStartMessage
   | LlmDeltaMessage
   | LlmDoneMessage
+  | TranscriptPartialMessage
   | TranscriptFinalMessage
   | TtsStartMessage
   | TtsChunkMessage
   | TtsEndMessage
   | ErrorMessage;
 
-export type ReservedMessage = ReservedTranscriptPartialMessage;
+export type ReservedMessage = never;
 
 export function createRequestId(): string {
   return globalThis.crypto.randomUUID();

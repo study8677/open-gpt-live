@@ -2,15 +2,17 @@
 
 OpenGPT Live uses a JSON WebSocket protocol between the browser client and the Voice Session Gateway.
 
-This MVP implements text input, push-to-talk audio input, and TTS audio output:
+This MVP implements text input, push-to-talk audio input, experimental live voice input, and TTS audio output:
 
 ```text
 browser text input -> WebSocket -> gateway -> LLM stream -> WebSocket -> browser token display
 browser audio chunks -> WebSocket -> gateway -> STT -> user text -> LLM stream
+browser VAD -> WebSocket -> gateway -> partial/final STT -> LLM stream
 LLM text -> gateway TTS -> WebSocket -> browser audio playback
 ```
 
-The current audio input path records a whole push-to-talk turn, aggregates MediaRecorder chunks in the gateway, transcribes the complete audio file once, and then submits the transcript into the same user text flow. It does not implement VAD or realtime transcription.
+The push-to-talk path records a whole turn, aggregates MediaRecorder chunks in the gateway, transcribes the complete audio file once, and then submits the transcript into the same user text flow.
+The experimental live mode uses browser-side VAD to mark speech boundaries while reusing the same `audio.chunk` channel. During a live turn, the gateway periodically retranscribes the accumulated WebM/Opus prefix and sends `transcript.partial`; after VAD marks the turn complete, it sends `transcript.final`.
 The TTS output path segments the assistant text and streams MP3 chunks back to the browser for queued playback.
 
 ## Connection
@@ -101,6 +103,7 @@ Sends one MediaRecorder chunk for the current push-to-talk turn. The browser sho
   "chunk": "base64-encoded-webm-opus-data",
   "mimeType": "audio/webm;codecs=opus",
   "sequence": 0,
+  "turnMode": "ptt",
   "isFinal": false
 }
 ```
@@ -113,6 +116,7 @@ Final message:
   "requestId": "request-uuid",
   "mimeType": "audio/webm;codecs=opus",
   "sequence": 5,
+  "turnMode": "ptt",
   "isFinal": true
 }
 ```
@@ -126,6 +130,56 @@ Gateway behavior:
 - Appends the transcript to in-memory session history as a user message.
 - Streams the assistant response through `llm.delta`.
 - Streams generated speech through `tts.start`, `tts.chunk`, and `tts.end` when TTS is configured.
+
+In live mode, `audio.chunk` uses `turnMode: "live"` and is scoped by `vad.speech_start` / `vad.speech_end`. The gateway may run partial STT while chunks are arriving, but only `transcript.final` is submitted to the LLM.
+
+### `vad.speech_start`
+
+Direction: client -> gateway
+
+Marks the start of a live-mode speech turn detected by client-side VAD.
+
+```json
+{
+  "type": "vad.speech_start",
+  "requestId": "request-uuid",
+  "turnMode": "live",
+  "startedAt": 1710000000000,
+  "rms": 0.031
+}
+```
+
+### `vad.speech_end`
+
+Direction: client -> gateway
+
+Marks the end of a live-mode speech turn. The client should send this after the final `audio.chunk` for the same `requestId`.
+
+```json
+{
+  "type": "vad.speech_end",
+  "requestId": "request-uuid",
+  "endedAt": 1710000002400,
+  "durationMs": 2400,
+  "reason": "silence"
+}
+```
+
+### `transcript.partial`
+
+Direction: gateway -> client
+
+Sends an interim transcript for an active live-mode turn. It is not appended to gateway conversation history.
+
+```json
+{
+  "type": "transcript.partial",
+  "requestId": "request-uuid",
+  "text": "What is the weather",
+  "sequence": 0,
+  "isStable": false
+}
+```
 
 ### `transcript.final`
 
@@ -270,22 +324,6 @@ Gateway behavior:
 - Sends `llm.done` with `reason: "interrupted"`.
 - Sends `tts.end` with `reason: "interrupted"` if TTS had started.
 - Does not append the partial assistant response to session history.
-
-## Reserved Events
-
-These events are part of the protocol namespace but are not implemented in this MVP.
-
-### `transcript.partial`
-
-Reserved for partial speech-to-text results.
-
-```json
-{
-  "type": "transcript.partial",
-  "requestId": "request-uuid",
-  "text": "partial transcript"
-}
-```
 
 ## Error Message
 
