@@ -16,6 +16,11 @@ import {
 } from "../lib/audio-pcm";
 import { resolveVadConfig } from "../lib/live-config";
 import {
+  AdaptiveVadEngine,
+  type SpeechDetector,
+  type VadSnapshot
+} from "../lib/vad-engine";
+import {
   beginLatencyRequest,
   markLatency,
   settleLatencyRequest,
@@ -102,9 +107,21 @@ const gatewayUrl =
   process.env.NEXT_PUBLIC_GATEWAY_WS_URL ?? "ws://localhost:8787";
 
 const vadConfig = resolveVadConfig({
+  adaptiveEnabled: process.env.NEXT_PUBLIC_VAD_ADAPTIVE_ENABLED,
+  calibrationMs: process.env.NEXT_PUBLIC_VAD_CALIBRATION_MS,
+  noiseFloorSmoothing: process.env.NEXT_PUBLIC_VAD_NOISE_FLOOR_SMOOTHING,
+  speechNoiseMultiplier:
+    process.env.NEXT_PUBLIC_VAD_SPEECH_NOISE_MULTIPLIER,
+  silenceNoiseMultiplier:
+    process.env.NEXT_PUBLIC_VAD_SILENCE_NOISE_MULTIPLIER,
+  dynamicSpeechMin: process.env.NEXT_PUBLIC_VAD_DYNAMIC_SPEECH_MIN,
+  dynamicSpeechMax: process.env.NEXT_PUBLIC_VAD_DYNAMIC_SPEECH_MAX,
+  dynamicSilenceMin: process.env.NEXT_PUBLIC_VAD_DYNAMIC_SILENCE_MIN,
+  dynamicSilenceMax: process.env.NEXT_PUBLIC_VAD_DYNAMIC_SILENCE_MAX,
   speechThreshold: process.env.NEXT_PUBLIC_VAD_SPEECH_THRESHOLD,
   silenceThreshold: process.env.NEXT_PUBLIC_VAD_SILENCE_THRESHOLD,
   startDebounceMs: process.env.NEXT_PUBLIC_VAD_START_DEBOUNCE_MS,
+  minimumSpeechMs: process.env.NEXT_PUBLIC_VAD_MIN_SPEECH_MS,
   hangoverMs: process.env.NEXT_PUBLIC_VAD_HANGOVER_MS,
   maxTurnMs: process.env.NEXT_PUBLIC_VAD_MAX_TURN_MS,
   preRollMs: process.env.NEXT_PUBLIC_VAD_PRE_ROLL_MS,
@@ -146,10 +163,8 @@ export default function Home() {
   const vadMuteGainRef = useRef<GainNode | null>(null);
   const fallbackResamplerRef = useRef<StreamingPcm16Resampler | null>(null);
   const fallbackFrameBufferRef = useRef<Pcm16FrameBuffer | null>(null);
-  const vadStateRef = useRef<"idle" | "speech_candidate" | "speaking">("idle");
-  const vadCandidateStartedAtRef = useRef(0);
-  const vadSilenceStartedAtRef = useRef(0);
-  const liveTurnStartedAtRef = useRef(0);
+  const speechDetectorRef = useRef<SpeechDetector | null>(null);
+  const lastVadUiUpdateAtRef = useRef(0);
   const liveModeRef = useRef(false);
   const liveListeningRef = useRef(false);
   const [connected, setConnected] = useState(false);
@@ -169,6 +184,11 @@ export default function Home() {
   >(null);
   const [latencySnapshot, setLatencySnapshot] =
     useState<LatencySnapshot | null>(null);
+  const [vadSnapshot, setVadSnapshot] = useState<VadSnapshot | null>(null);
+
+  if (!speechDetectorRef.current) {
+    speechDetectorRef.current = new AdaptiveVadEngine(vadConfig);
+  }
 
   const canSend = useMemo(
     () => connected && input.trim().length > 0 && !activeRequestId,
@@ -847,9 +867,17 @@ export default function Home() {
       streamRef.current = stream;
       liveModeRef.current = true;
       liveListeningRef.current = true;
+      const resetAt = performance.now();
+      const resetSnapshot = speechDetectorRef.current?.reset(resetAt) ?? null;
+      lastVadUiUpdateAtRef.current = resetAt;
+      setVadSnapshot(resetSnapshot);
       await setupVadPipeline(stream);
       setLiveMode(true);
-      setRecordingStatus("Live mode listening...");
+      setRecordingStatus(
+        vadConfig.adaptiveEnabled
+          ? "Live mode calibrating ambient noise..."
+          : "Live mode listening..."
+      );
     } catch {
       cleanupLiveMode(false);
       setMicError("Could not start live mode. Text input is still available.");
@@ -923,81 +951,54 @@ export default function Home() {
     }
 
     const now = performance.now();
+    const detector = speechDetectorRef.current;
+    if (!detector) {
+      return;
+    }
     const frame: LivePcmFrame = {
       samples,
       durationMs: (samples.length / LIVE_PCM_SAMPLE_RATE) * 1_000
     };
-    if (vadStateRef.current === "speaking") {
+    if (detector.isTurnActive()) {
       sendLivePcmFrame(frame);
     } else {
       appendPreRollFrame(frame);
     }
 
     const playbackActive = isPlaybackActive();
-    const speechThreshold =
-      vadConfig.speechThreshold *
-      (playbackActive ? vadConfig.playbackThresholdMultiplier : 1);
+    const wasCalibrating = detector.getSnapshot().state === "calibrating";
+    const result = detector.processFrame({
+      rms,
+      now,
+      playbackActive,
+      suppressStartsUntil: playbackVadSuppressedUntilRef.current
+    });
+    if (result.event || now - lastVadUiUpdateAtRef.current >= 150) {
+      lastVadUiUpdateAtRef.current = now;
+      setVadSnapshot(result.snapshot);
+    }
 
-    if (
-      now < playbackVadSuppressedUntilRef.current &&
-      vadStateRef.current !== "speaking"
-    ) {
-      vadStateRef.current = "idle";
-      vadCandidateStartedAtRef.current = 0;
+    if (wasCalibrating && result.snapshot.state !== "calibrating") {
+      setRecordingStatus("Live mode listening...");
+    }
+
+    if (result.event?.type === "speech_start") {
+      startLiveSpeechTurn(rms, result.event.startedAt);
+    } else if (result.event?.type === "speech_end") {
+      endLiveSpeechTurn(
+        result.event.reason === "max_duration" ? "manual" : "silence"
+      );
+    } else if (result.event?.type === "speech_cancel") {
+      cancelLivePcmTurn(true);
       clearPreRoll();
-      return;
-    }
-
-    if (vadStateRef.current === "idle") {
-      if (rms >= speechThreshold) {
-        vadStateRef.current = "speech_candidate";
-        vadCandidateStartedAtRef.current = now;
-      }
-      return;
-    }
-
-    if (vadStateRef.current === "speech_candidate") {
-      if (rms < vadConfig.silenceThreshold) {
-        vadStateRef.current = "idle";
-        vadCandidateStartedAtRef.current = 0;
-        return;
-      }
-
-      if (
-        rms >= speechThreshold &&
-        now - vadCandidateStartedAtRef.current >= vadConfig.startDebounceMs
-      ) {
-        vadStateRef.current = "speaking";
-        vadSilenceStartedAtRef.current = 0;
-        startLiveSpeechTurn(rms);
-      }
-      return;
-    }
-
-    if (now - liveTurnStartedAtRef.current >= vadConfig.maxTurnMs) {
-      endLiveSpeechTurn("manual");
-      return;
-    }
-
-    if (rms >= vadConfig.silenceThreshold) {
-      vadSilenceStartedAtRef.current = 0;
-      return;
-    }
-
-    if (vadSilenceStartedAtRef.current === 0) {
-      vadSilenceStartedAtRef.current = now;
-      return;
-    }
-
-    if (now - vadSilenceStartedAtRef.current >= vadConfig.hangoverMs) {
-      endLiveSpeechTurn("silence");
+      setRecordingStatus("Live mode listening (short sound ignored)...");
     }
   }
 
-  function startLiveSpeechTurn(rms: number): void {
+  function startLiveSpeechTurn(rms: number, detectedAt: number): void {
     const socket = socketRef.current;
     if (!socket || livePcmTurnRef.current) {
-      vadStateRef.current = "idle";
+      speechDetectorRef.current?.cancelTurn(performance.now());
       return;
     }
 
@@ -1013,8 +1014,6 @@ export default function Home() {
     }
 
     const requestId = createRequestId();
-    const detectedAt = vadCandidateStartedAtRef.current || performance.now();
-    liveTurnStartedAtRef.current = detectedAt;
     const turn: LivePcmTurn = {
       requestId,
       sequence: 0,
@@ -1087,14 +1086,7 @@ export default function Home() {
   }
 
   function endLiveSpeechTurn(reason: "silence" | "manual"): void {
-    if (vadStateRef.current !== "speaking") {
-      return;
-    }
-
     const turn = livePcmTurnRef.current;
-    vadStateRef.current = "idle";
-    vadCandidateStartedAtRef.current = 0;
-    vadSilenceStartedAtRef.current = 0;
     livePcmTurnRef.current = null;
     clearPreRoll();
     setRecording(false);
@@ -1169,14 +1161,13 @@ export default function Home() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     clearPreRoll();
-    vadStateRef.current = "idle";
-    vadCandidateStartedAtRef.current = 0;
-    vadSilenceStartedAtRef.current = 0;
-    liveTurnStartedAtRef.current = 0;
+    speechDetectorRef.current?.reset(performance.now());
+    lastVadUiUpdateAtRef.current = 0;
     if (updateUi) {
       setLiveMode(false);
       setRecording(false);
       setRecordingStatus(null);
+      setVadSnapshot(null);
     }
   }
 
@@ -1465,9 +1456,7 @@ export default function Home() {
     if (liveTurn?.requestId === requestId) {
       liveTurn.cancelled = true;
       livePcmTurnRef.current = null;
-      vadStateRef.current = "idle";
-      vadCandidateStartedAtRef.current = 0;
-      vadSilenceStartedAtRef.current = 0;
+      speechDetectorRef.current?.cancelTurn(performance.now());
       clearPreRoll();
       setRecording(false);
     }
@@ -1564,6 +1553,11 @@ export default function Home() {
       </section>
 
       <LatencyPanel snapshot={latencySnapshot} />
+      <VadPanel
+        snapshot={vadSnapshot}
+        liveMode={liveMode}
+        adaptiveEnabled={vadConfig.adaptiveEnabled}
+      />
 
       <section className="messages" aria-live="polite">
         {messages.length === 0 ? (
@@ -1682,6 +1676,61 @@ function LatencyPanel({ snapshot }: { snapshot: LatencySnapshot | null }) {
       </dl>
     </section>
   );
+}
+
+function VadPanel({
+  snapshot,
+  liveMode,
+  adaptiveEnabled
+}: {
+  snapshot: VadSnapshot | null;
+  liveMode: boolean;
+  adaptiveEnabled: boolean;
+}) {
+  const state = !liveMode
+    ? "off"
+    : snapshot?.state === "calibrating"
+      ? `calibrating ${Math.round(snapshot.calibrationProgress * 100)}%`
+      : (snapshot?.state ?? "starting");
+
+  return (
+    <section className="vadPanel" aria-label="Voice activity detector status">
+      <div className="vadHeading">
+        <strong>Voice activity</strong>
+        <span>
+          {snapshot?.adaptive ?? adaptiveEnabled
+            ? liveMode
+              ? "adaptive"
+              : "adaptive ready"
+            : "fixed fallback"}
+        </span>
+      </div>
+      <dl>
+        <div>
+          <dt>State</dt>
+          <dd>{state}</dd>
+        </div>
+        <div>
+          <dt>RMS</dt>
+          <dd>{formatVadLevel(snapshot?.rms)}</dd>
+        </div>
+        <div>
+          <dt>Noise floor</dt>
+          <dd>{formatVadLevel(snapshot?.noiseFloor)}</dd>
+        </div>
+        <div>
+          <dt>Speech / silence</dt>
+          <dd>
+            {formatVadLevel(snapshot?.speechThreshold)} / {formatVadLevel(snapshot?.silenceThreshold)}
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function formatVadLevel(value: number | undefined): string {
+  return value === undefined ? "—" : value.toFixed(4);
 }
 
 function sendRaw(socket: WebSocket, message: ClientMessage): boolean {

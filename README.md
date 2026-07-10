@@ -55,9 +55,10 @@ OpenGPT Live is a self-hostable realtime voice AI reference implementation for t
 | Push-to-talk | Stable | MediaRecorder chunks, full-turn STT, and a 25 MB guard. |
 | Spoken replies | Stable | Sentence-segmented TTS and ordered browser playback. |
 | Stop / interrupt | Stable | Abort propagation across LLM, TTS, playback, and late events. |
-| Live Mode | Experimental | Browser RMS VAD with configurable thresholds and reconnect cleanup. |
+| Live Mode | Experimental | Adaptive browser RMS VAD with noise calibration, turn guards, and reconnect cleanup. |
 | First-syllable protection | Experimental | A 400 ms PCM pre-roll is sent when VAD confirms speech. |
 | Streaming STT | Experimental | OpenAI Realtime transcription with incremental deltas and batch WAV fallback. |
+| Voice diagnostics | Stable | Per-turn latency and VAD panels expose first transcript, first token, first audio, noise floor, and thresholds. |
 | Quality baseline | Stable | Runtime protocol validation, automated integration tests, CI, and production builds. |
 
 ## Provider compatibility
@@ -163,7 +164,7 @@ GitHub Actions runs type checking, tests, and production builds for every push a
 
 - Conversation history lives only for the current WebSocket connection.
 - Supplying an old `sessionId` does not restore previous messages.
-- RMS-only VAD can still false-trigger in noisy rooms or with loud speakers.
+- Adaptive RMS VAD cannot distinguish speech from every non-speech sound and does not replace acoustic echo cancellation.
 - The Realtime STT adapter is currently OpenAI-specific; batch STT remains OpenAI-compatible.
 - Authentication, billing, multi-tenant isolation, tools, and long-term memory are not included.
 - Chromium is the verified browser baseline; see [browser-support.md](docs/browser-support.md) before claiming broader support.

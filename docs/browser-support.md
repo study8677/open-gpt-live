@@ -24,9 +24,9 @@ The UI automatically falls back to text input when microphone capture is unavail
 
 ## Known audio limitations
 
-- RMS-only VAD is sensitive to room noise and speaker echo.
+- Adaptive RMS VAD calibrates and follows gradual room-noise changes, but it cannot classify human voice as accurately as a model-backed detector.
 - A 400 ms PCM pre-roll reduces clipped first syllables but does not replace acoustic echo cancellation.
 - TTS playback raises the VAD threshold and briefly suppresses new starts after playback; loud speakers can still cause false barge-in.
 - Browser autoplay rules may require one explicit click before spoken replies can play.
 
-Use headphones when evaluating turn detection separately from echo behavior.
+Wait for the one-second calibration state to finish before speaking. Use headphones when evaluating turn detection separately from echo behavior.

@@ -12,6 +12,9 @@ and the project uses semantic versioning while it remains pre-1.0.
   community.
 - Request-scoped browser and Gateway latency telemetry for STT, LLM, TTS, and
   actual first-audio playback, including request mode and STT path context.
+- Adaptive browser RMS VAD with initial noise calibration, idle-only noise-floor
+  tracking, dynamic dual thresholds, turn guards, fixed-threshold fallback, and
+  a live diagnostics panel.
 
 ## 0.2.0 - 2026-07-10
 

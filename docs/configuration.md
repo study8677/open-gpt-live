@@ -91,18 +91,32 @@ Realtime STT expects PCM16, mono, 24 kHz input. It is an explicit opt-in because
 
 `NEXT_PUBLIC_GATEWAY_WS_URL` defaults to `ws://localhost:8787`. Production pages served over HTTPS must use a `wss://` URL.
 
+Live Mode calibrates the room for one second, then derives separate speech and silence thresholds from an idle-only moving noise floor. The noise floor is frozen while a turn is active, so the user's voice cannot teach the detector that speech is background noise. Set `NEXT_PUBLIC_VAD_ADAPTIVE_ENABLED=false` to use the original fixed thresholds.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_VAD_SPEECH_THRESHOLD` | `0.02` | RMS level used to identify speech. |
-| `NEXT_PUBLIC_VAD_SILENCE_THRESHOLD` | `0.012` | RMS level used to identify silence. |
+| `NEXT_PUBLIC_VAD_ADAPTIVE_ENABLED` | `true` | Enables initial noise calibration and idle noise-floor tracking. |
+| `NEXT_PUBLIC_VAD_CALIBRATION_MS` | `1000` | Quiet-room sampling window when Live Mode starts. |
+| `NEXT_PUBLIC_VAD_NOISE_FLOOR_SMOOTHING` | `0.08` | Idle noise-floor EWMA weight; higher values adapt faster. |
+| `NEXT_PUBLIC_VAD_SPEECH_NOISE_MULTIPLIER` | `3` | Noise-floor multiplier used for the dynamic speech-start threshold. |
+| `NEXT_PUBLIC_VAD_SILENCE_NOISE_MULTIPLIER` | `1.8` | Noise-floor multiplier used for the lower silence threshold. |
+| `NEXT_PUBLIC_VAD_DYNAMIC_SPEECH_MIN` | `0.012` | Lower clamp for the adaptive speech threshold. |
+| `NEXT_PUBLIC_VAD_DYNAMIC_SPEECH_MAX` | `0.12` | Upper clamp for the adaptive speech threshold. |
+| `NEXT_PUBLIC_VAD_DYNAMIC_SILENCE_MIN` | `0.006` | Lower clamp for the adaptive silence threshold. |
+| `NEXT_PUBLIC_VAD_DYNAMIC_SILENCE_MAX` | `0.08` | Upper clamp for the adaptive silence threshold; also kept below speech start. |
+| `NEXT_PUBLIC_VAD_SPEECH_THRESHOLD` | `0.02` | Fixed speech threshold used only when adaptive mode is disabled. |
+| `NEXT_PUBLIC_VAD_SILENCE_THRESHOLD` | `0.012` | Fixed silence threshold used only when adaptive mode is disabled. |
 | `NEXT_PUBLIC_VAD_START_DEBOUNCE_MS` | `160` | Required speech duration before a live turn starts. |
-| `NEXT_PUBLIC_VAD_HANGOVER_MS` | `750` | Silence duration before a live turn ends. |
+| `NEXT_PUBLIC_VAD_MIN_SPEECH_MS` | `200` | Minimum accumulated voiced duration; short phrases remain usable while briefer sounds are cancelled rather than transcribed. |
+| `NEXT_PUBLIC_VAD_HANGOVER_MS` | `750` | Pause grace before a live turn ends. A paused turn resumes only after crossing the speech threshold, intentionally rejecting low-level noise. |
 | `NEXT_PUBLIC_VAD_MAX_TURN_MS` | `30000` | Maximum duration of one live turn. |
 | `NEXT_PUBLIC_VAD_PRE_ROLL_MS` | `400` | Audio retained before VAD confirmation so the first syllable is preserved. |
 | `NEXT_PUBLIC_VAD_PLAYBACK_THRESHOLD_MULTIPLIER` | `2.5` | Raises the speech threshold while TTS is playing. |
 | `NEXT_PUBLIC_VAD_PLAYBACK_SUPPRESS_AFTER_END_MS` | `300` | Prevents immediate self-triggering after playback. |
 
 These values are build-time browser configuration. Rebuild the Web app after changing them.
+
+The current `SpeechDetector` implementation deliberately remains lightweight RMS logic. It is behind a small interface so a WebRTC VAD or model-backed detector can be substituted later without changing audio capture or turn transport.
 
 ## Startup validation
 

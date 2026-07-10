@@ -14,11 +14,21 @@ Before starting, confirm `curl http://127.0.0.1:8787/healthz` returns `status: o
 ## Live Mode Turn Detection
 
 1. Click `Live experimental`.
-2. Speak without holding `Hold to Talk`.
-3. Confirm the page shows a gray italic partial transcript while you are speaking.
-4. Stop speaking and wait for the hangover window.
-5. Confirm the partial transcript is replaced by a normal final user message.
-6. Confirm the assistant responds through the existing LLM/TTS path.
+2. Stay quiet while the Voice activity panel advances from `calibrating` to `idle`.
+3. Speak without holding `Hold to Talk`.
+4. Confirm the panel moves through `speech_candidate` to `speaking` and the page shows a gray italic partial transcript.
+5. Pause for less than the configured hangover, resume speaking, and confirm this remains one turn. Pause again past the hangover.
+6. Confirm the partial transcript is replaced by a normal final user message.
+7. Confirm the assistant responds through the existing LLM/TTS path.
+
+## Adaptive Noise And Short-Sound Rejection
+
+1. Start Live Mode in steady fan or air-conditioner noise and remain quiet during calibration.
+2. Confirm the displayed noise floor settles below the speech threshold and ambient noise does not open a turn.
+3. Tap once or make a sound shorter than `NEXT_PUBLIC_VAD_MIN_SPEECH_MS`; confirm it returns to listening without producing a transcript.
+4. Change microphone gain or fan speed gradually and confirm the idle noise floor follows without entering `speaking`.
+5. Speak normally and confirm the noise floor stays stable while the panel is `speaking` or `pause`.
+6. Set `NEXT_PUBLIC_VAD_ADAPTIVE_ENABLED=false`, rebuild, and confirm the panel reports `fixed fallback` with the configured legacy thresholds.
 
 ## Pre-Roll
 
@@ -56,7 +66,8 @@ Before starting, confirm `curl http://127.0.0.1:8787/healthz` returns `status: o
 1. Use speakers instead of headphones.
 2. Trigger a TTS response at a moderate volume.
 3. Confirm live mode does not immediately start a new turn from the assistant voice.
-4. Increase volume and repeat; note any false barge-in as a known limitation of RMS-only VAD.
+4. Increase volume and repeat; confirm the displayed speech threshold rises during playback and returns after it ends.
+5. Note any false barge-in as a known limitation of RMS-based VAD.
 
 ## Permission And Fallbacks
 
