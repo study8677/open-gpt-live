@@ -149,6 +149,7 @@ docker build -f Dockerfile.web -t open-gpt-live-web .
 - [x] Chromium 完成断线、Reconnecting 和自动恢复验证。
 - [x] Gateway Docker 镜像启动及健康检查通过。
 - [x] Web Docker 镜像启动及 HTTP 检查通过。
+- [x] 功能分支和 Pull Request 的 GitHub Actions 均通过。
 
 ## 发布后人工验证
 
@@ -158,7 +159,6 @@ docker build -f Dockerfile.web -t open-gpt-live-web .
 - [ ] 使用真实麦克风确认短句第一个字没有被截断或重复。
 - [ ] 使用扬声器验证 TTS 回声与 barge-in。
 - [ ] 在 Edge、Safari 和 Firefox 各执行一次浏览器冒烟测试。
-- [ ] 分支推送后确认 GitHub Actions 通过。
 
 这些是环境验收，不是缺失的 P0–P2 实现。
 
