@@ -20,6 +20,9 @@ import { WebSocket, WebSocketServer } from "ws";
 
 const port = Number.parseInt(process.env.GATEWAY_PORT ?? "8787", 10);
 const maxAudioTurnBytes = 25 * 1024 * 1024;
+const livePartialInitialIntervalMs = 2_000;
+const livePartialLongTurnIntervalMs = 5_000;
+const livePartialLongTurnAfterMs = 30_000;
 const ttsSegmentMinLength = 24;
 const ttsSegmentMaxLength = 240;
 const ttsFormat = process.env.TTS_FORMAT ?? "mp3";
@@ -45,15 +48,21 @@ interface SessionState {
   sessionId: string;
   history: LLMMessage[];
   current?: ActiveRun;
-  audioTurns: Map<string, AudioTurn>;
+  audioTurns: Map<string, ActiveAudioTurn>;
 }
 
-interface AudioTurn {
+interface ActiveAudioTurn {
   requestId: string;
+  turnMode: "ptt" | "live";
+  state: "recording" | "transcribing" | "done" | "error";
   mimeType: string;
   chunks: Buffer[];
   byteLength: number;
   lastSequence: number;
+  startedAt: number;
+  partialSequence: number;
+  lastPartialAt: number;
+  partialInFlight: boolean;
 }
 
 const wss = new WebSocketServer({ port });
@@ -124,6 +133,16 @@ async function handleMessage(
     return;
   }
 
+  if (message.type === WS_EVENTS.VAD_SPEECH_START) {
+    startLiveAudioTurn(socket, session, message.requestId, message.startedAt);
+    return;
+  }
+
+  if (message.type === WS_EVENTS.VAD_SPEECH_END) {
+    await finishLiveAudioTurn(socket, session, message.requestId);
+    return;
+  }
+
   if (message.type === WS_EVENTS.USER_TEXT) {
     const text = message.text.trim();
     if (!text) {
@@ -189,43 +208,104 @@ async function handleAudioChunk(
   }
 
   if (!message.isFinal) {
+    maybeSchedulePartialTranscription(socket, session, turn);
     return;
   }
 
-  session.audioTurns.delete(message.requestId);
+  if (turn.turnMode === "live") {
+    return;
+  }
 
+  await finishAudioTurn(socket, session, turn);
+}
+
+function startLiveAudioTurn(
+  socket: WebSocket,
+  session: SessionState,
+  requestId: string,
+  startedAt: number
+): void {
+  const existing = session.audioTurns.get(requestId);
+  if (existing) {
+    return;
+  }
+
+  session.audioTurns.set(requestId, {
+    requestId,
+    turnMode: "live",
+    state: "recording",
+    mimeType: "audio/webm",
+    chunks: [],
+    byteLength: 0,
+    lastSequence: -1,
+    startedAt,
+    partialSequence: 0,
+    lastPartialAt: startedAt,
+    partialInFlight: false
+  });
+}
+
+async function finishLiveAudioTurn(
+  socket: WebSocket,
+  session: SessionState,
+  requestId: string
+): Promise<void> {
+  const turn = session.audioTurns.get(requestId);
+  if (!turn || turn.turnMode !== "live" || turn.state !== "recording") {
+    return;
+  }
+
+  await finishAudioTurn(socket, session, turn);
+}
+
+async function finishAudioTurn(
+  socket: WebSocket,
+  session: SessionState,
+  turn: ActiveAudioTurn
+): Promise<void> {
+  if (turn.state !== "recording") {
+    return;
+  }
+
+  turn.state = "transcribing";
   try {
     const transcript = await transcribeAudioTurn(sttProvider, turn);
     if (!transcript) {
+      turn.state = "error";
+      session.audioTurns.delete(turn.requestId);
       send(socket, {
         type: "error",
-        requestId: message.requestId,
+        requestId: turn.requestId,
         message: "Transcription returned empty text"
       });
       send(socket, {
         type: WS_EVENTS.LLM_DONE,
-        requestId: message.requestId,
+        requestId: turn.requestId,
         reason: "error"
       });
       return;
     }
 
+    turn.state = "done";
+    session.audioTurns.delete(turn.requestId);
     send(socket, {
       type: WS_EVENTS.TRANSCRIPT_FINAL,
-      requestId: message.requestId,
+      requestId: turn.requestId,
       text: transcript
     });
 
-    await handleUserText(socket, session, message.requestId, transcript);
+    await handleUserText(socket, session, turn.requestId, transcript);
   } catch (error) {
+    turn.state = "error";
+    session.audioTurns.delete(turn.requestId);
     send(socket, {
       type: "error",
-      requestId: message.requestId,
+      requestId: turn.requestId,
       message: error instanceof Error ? error.message : "Unknown transcription error"
     });
     send(socket, {
       type: WS_EVENTS.LLM_DONE,
-      requestId: message.requestId,
+      requestId: turn.requestId,
       reason: "error"
     });
   }
@@ -234,18 +314,27 @@ async function handleAudioChunk(
 function getOrCreateAudioTurn(
   session: SessionState,
   message: AudioChunkMessage
-): AudioTurn {
+): ActiveAudioTurn {
   const existing = session.audioTurns.get(message.requestId);
   if (existing) {
+    if (!existing.mimeType || existing.mimeType === "audio/webm") {
+      existing.mimeType = message.mimeType;
+    }
     return existing;
   }
 
-  const turn: AudioTurn = {
+  const turn: ActiveAudioTurn = {
     requestId: message.requestId,
+    turnMode: message.turnMode ?? "ptt",
+    state: "recording",
     mimeType: message.mimeType,
     chunks: [],
     byteLength: 0,
-    lastSequence: -1
+    lastSequence: -1,
+    startedAt: Date.now(),
+    partialSequence: 0,
+    lastPartialAt: Date.now(),
+    partialInFlight: false
   };
   session.audioTurns.set(message.requestId, turn);
   return turn;
@@ -253,9 +342,79 @@ function getOrCreateAudioTurn(
 
 async function transcribeAudioTurn(
   provider: STTProvider,
-  turn: AudioTurn
+  turn: ActiveAudioTurn
 ): Promise<string> {
   const audio = Buffer.concat(turn.chunks);
+  if (audio.byteLength === 0) {
+    return "";
+  }
+
+  const result = await provider.transcribe({
+    data: audio,
+    mimeType: turn.mimeType,
+    filename: filenameForMimeType(turn.mimeType)
+  });
+
+  return result.text.trim();
+}
+
+function maybeSchedulePartialTranscription(
+  socket: WebSocket,
+  session: SessionState,
+  turn: ActiveAudioTurn
+): void {
+  if (
+    turn.turnMode !== "live" ||
+    turn.state !== "recording" ||
+    turn.partialInFlight ||
+    turn.chunks.length === 0
+  ) {
+    return;
+  }
+
+  const now = Date.now();
+  const elapsed = now - turn.startedAt;
+  const interval =
+    elapsed > livePartialLongTurnAfterMs
+      ? livePartialLongTurnIntervalMs
+      : livePartialInitialIntervalMs;
+
+  if (now - turn.lastPartialAt < interval) {
+    return;
+  }
+
+  turn.lastPartialAt = now;
+  turn.partialInFlight = true;
+  const audio = Buffer.concat(turn.chunks);
+  const partialSequence = turn.partialSequence++;
+
+  void transcribeAudioSnapshot(sttProvider, turn, audio)
+    .then((text) => {
+      if (
+        text &&
+        session.audioTurns.get(turn.requestId) === turn &&
+        turn.state === "recording"
+      ) {
+        send(socket, {
+          type: WS_EVENTS.TRANSCRIPT_PARTIAL,
+          requestId: turn.requestId,
+          text,
+          sequence: partialSequence,
+          isStable: false
+        });
+      }
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      turn.partialInFlight = false;
+    });
+}
+
+async function transcribeAudioSnapshot(
+  provider: STTProvider,
+  turn: ActiveAudioTurn,
+  audio: Buffer
+): Promise<string> {
   if (audio.byteLength === 0) {
     return "";
   }
