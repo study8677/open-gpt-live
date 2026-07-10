@@ -174,3 +174,16 @@ Run `pnpm check` before opening a pull request. Protocol or turn-lifecycle chang
 ## License
 
 [MIT](LICENSE)
+
+
+## Local Markdown link check
+
+Validate local Markdown links/images without hitting the network:
+
+```bash
+pnpm check:md-links
+pnpm test:md-links
+```
+
+Voice latency reports can use the template in
+[`docs/voice-quality-benchmark-report.md`](docs/voice-quality-benchmark-report.md).

@@ -12,7 +12,9 @@
     "start": "NODE_ENV=production pnpm --parallel --stream --filter @open-gpt-live/gateway --filter @open-gpt-live/web start",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "check:md-links": "node scripts/check-md-links.mjs",
+    "test:md-links": "node scripts/check-md-links.test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.3",
