@@ -107,6 +107,11 @@ button:disabled {
   background: #fafafa;
 }
 
+.message.transient {
+  color: #6f6f6f;
+  font-style: italic;
+}
+
 .message strong {
   display: inline-block;
   font-size: 13px;
@@ -156,7 +161,7 @@ button:disabled {
 .composer {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
 }
 
 .composer input {

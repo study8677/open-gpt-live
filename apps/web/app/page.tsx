@@ -14,6 +14,7 @@ interface ChatMessage {
   content: string;
   requestId: string;
   source?: "text" | "audio";
+  transient?: boolean;
 }
 
 interface QueuedAudioChunk {
@@ -40,6 +41,22 @@ interface BlockedPlayback {
 const gatewayUrl =
   process.env.NEXT_PUBLIC_GATEWAY_WS_URL ?? "ws://localhost:8787";
 
+// VAD thresholds are RMS amplitudes in normalized float audio samples.
+const vadSpeechThreshold = 0.02;
+const vadSilenceThreshold = 0.012;
+// User speech must stay above threshold for this many ms before a turn starts.
+const vadStartDebounceMs = 160;
+// A speaking turn ends after this many ms below the silence threshold.
+const vadHangoverMs = 750;
+// Hard cap for one live-mode turn, in ms.
+const vadMaxTurnMs = 30_000;
+// MediaRecorder chunk size in ms for both push-to-talk and live mode.
+const recorderTimesliceMs = 250;
+// Raise the VAD threshold while TTS is playing to reduce self-triggering.
+const playbackVadThresholdMultiplier = 2.5;
+// Suppress VAD starts for this many ms after playback ends.
+const playbackVadSuppressAfterEndMs = 300;
+
 export default function Home() {
   const socketRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -48,17 +65,33 @@ export default function Home() {
   const audioMimeTypeRef = useRef<string>("audio/webm");
   const audioSequenceRef = useRef(0);
   const pendingChunkSendsRef = useRef<Array<Promise<void>>>([]);
+  const currentTurnModeRef = useRef<"ptt" | "live">("ptt");
+  const activeRequestIdRef = useRef<string | null>(null);
   const playbackQueuesRef = useRef<Map<string, PlaybackQueue>>(new Map());
   const ignoredPlaybackRequestsRef = useRef<Set<string>>(new Set());
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioObjectUrlRef = useRef<string | null>(null);
   const objectUrlsRef = useRef<Set<string>>(new Set());
   const blockedPlaybackRef = useRef<BlockedPlayback | null>(null);
+  const playbackVadSuppressedUntilRef = useRef(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const vadSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const vadWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const vadScriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const vadMuteGainRef = useRef<GainNode | null>(null);
+  const vadStateRef = useRef<"idle" | "speech_candidate" | "speaking">("idle");
+  const vadCandidateStartedAtRef = useRef(0);
+  const vadSilenceStartedAtRef = useRef(0);
+  const liveTurnStartedAtRef = useRef(0);
+  const liveModeRef = useRef(false);
+  const liveListeningRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [liveMode, setLiveMode] = useState(false);
+  const [liveListening, setLiveListening] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<string | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
@@ -71,6 +104,18 @@ export default function Home() {
     () => connected && input.trim().length > 0 && !activeRequestId,
     [activeRequestId, connected, input]
   );
+
+  useEffect(() => {
+    activeRequestIdRef.current = activeRequestId;
+  }, [activeRequestId]);
+
+  useEffect(() => {
+    liveModeRef.current = liveMode;
+  }, [liveMode]);
+
+  useEffect(() => {
+    liveListeningRef.current = liveListening;
+  }, [liveListening]);
 
   useEffect(() => {
     const socket = new WebSocket(gatewayUrl);
@@ -102,6 +147,7 @@ export default function Home() {
 
     return () => {
       cleanupAllPlayback();
+      cleanupLiveMode();
       cleanupRecording();
       socket.close();
       socketRef.current = null;
@@ -125,24 +171,74 @@ export default function Home() {
       return;
     }
 
+    if (message.type === WS_EVENTS.TRANSCRIPT_PARTIAL) {
+      setRecordingStatus("Listening...");
+      setMessages((current) => {
+        const existing = current.find(
+          (item) => item.requestId === message.requestId && item.role === "user"
+        );
+        if (existing) {
+          return current.map((item) =>
+            item.id === existing.id
+              ? { ...item, content: message.text, transient: true }
+              : item
+          );
+        }
+
+        return [
+          ...current,
+          {
+            id: createRequestId(),
+            role: "user",
+            content: message.text,
+            requestId: message.requestId,
+            source: "audio",
+            transient: true
+          }
+        ];
+      });
+      return;
+    }
+
     if (message.type === WS_EVENTS.TRANSCRIPT_FINAL) {
       setRecordingStatus(null);
-      setMessages((current) => [
-        ...current,
-        {
-          id: createRequestId(),
-          role: "user",
-          content: message.text,
-          requestId: message.requestId,
-          source: "audio"
-        },
-        {
-          id: createRequestId(),
-          role: "assistant",
-          content: "",
-          requestId: message.requestId
-        }
-      ]);
+      setMessages((current) => {
+        const hasUser = current.some(
+          (item) => item.requestId === message.requestId && item.role === "user"
+        );
+        const hasAssistant = current.some(
+          (item) =>
+            item.requestId === message.requestId && item.role === "assistant"
+        );
+        const next = hasUser
+          ? current.map((item) =>
+              item.requestId === message.requestId && item.role === "user"
+                ? { ...item, content: message.text, transient: false }
+                : item
+            )
+          : [
+              ...current,
+              {
+                id: createRequestId(),
+                role: "user" as const,
+                content: message.text,
+                requestId: message.requestId,
+                source: "audio" as const
+              }
+            ];
+
+        return hasAssistant
+          ? next
+          : [
+              ...next,
+              {
+                id: createRequestId(),
+                role: "assistant",
+                content: "",
+                requestId: message.requestId
+              }
+            ];
+      });
       return;
     }
 
@@ -271,7 +367,7 @@ export default function Home() {
       setMicError(null);
       setRecordingStatus("Requesting microphone permission...");
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await getAudioInputStream();
       const mimeType = selectAudioMimeType();
       const requestId = createRequestId();
       const recorder = new MediaRecorder(
@@ -282,6 +378,7 @@ export default function Home() {
       recorderRef.current = recorder;
       streamRef.current = stream;
       audioRequestRef.current = requestId;
+      currentTurnModeRef.current = "ptt";
       audioMimeTypeRef.current = recorder.mimeType || mimeType || "audio/webm";
       audioSequenceRef.current = 0;
       pendingChunkSendsRef.current = [];
@@ -303,7 +400,7 @@ export default function Home() {
         void finalizeRecording();
       });
 
-      recorder.start(250);
+      recorder.start(recorderTimesliceMs);
     } catch (reason) {
       cleanupRecording();
       setMicError(
@@ -341,6 +438,7 @@ export default function Home() {
       chunk,
       mimeType: audioMimeTypeRef.current,
       sequence,
+      turnMode: currentTurnModeRef.current,
       isFinal: false
     });
   }
@@ -358,22 +456,34 @@ export default function Home() {
           requestId,
           mimeType: audioMimeTypeRef.current,
           sequence: audioSequenceRef.current,
+          turnMode: currentTurnModeRef.current,
           isFinal: true
         });
+        if (currentTurnModeRef.current === "live") {
+          sendRaw(socket, {
+            type: WS_EVENTS.VAD_SPEECH_END,
+            requestId,
+            endedAt: Date.now(),
+            durationMs: Date.now() - liveTurnStartedAtRef.current,
+            reason: "silence"
+          });
+        }
       }
     } catch {
       setError("Could not send recorded audio.");
       setActiveRequestId(null);
       setRecordingStatus(null);
     } finally {
-      cleanupRecording();
+      cleanupRecording(currentTurnModeRef.current !== "live");
     }
   }
 
-  function cleanupRecording(): void {
+  function cleanupRecording(stopStream = true): void {
     recorderRef.current = null;
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+    if (stopStream) {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
     audioRequestRef.current = null;
     pendingChunkSendsRef.current = [];
     setRecording(false);
@@ -393,6 +503,289 @@ export default function Home() {
       requestId: activeRequestId,
       reason: "user clicked stop"
     });
+  }
+
+  async function toggleLiveMode(): Promise<void> {
+    if (liveModeRef.current) {
+      cleanupLiveMode();
+      liveModeRef.current = false;
+      liveListeningRef.current = false;
+      setLiveMode(false);
+      setLiveListening(false);
+      setRecordingStatus(null);
+      return;
+    }
+
+    if (!connected || !navigator.mediaDevices?.getUserMedia) {
+      setMicError("This browser does not support microphone recording.");
+      return;
+    }
+
+    try {
+      setError(null);
+      setMicError(null);
+      setRecordingStatus("Starting live mode...");
+      const stream = await getAudioInputStream();
+      streamRef.current = stream;
+      liveModeRef.current = true;
+      liveListeningRef.current = true;
+      await setupVadPipeline(stream);
+      setLiveMode(true);
+      setLiveListening(true);
+      setRecordingStatus("Live mode listening...");
+    } catch {
+      cleanupLiveMode();
+      setLiveMode(false);
+      setLiveListening(false);
+      setRecordingStatus(null);
+      setMicError("Could not start live mode. Text input is still available.");
+    }
+  }
+
+  async function setupVadPipeline(stream: MediaStream): Promise<void> {
+    cleanupVadPipeline();
+    const AudioContextConstructor =
+      window.AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    const audioContext = new AudioContextConstructor();
+    const source = audioContext.createMediaStreamSource(stream);
+    const muteGain = audioContext.createGain();
+    muteGain.gain.value = 0;
+
+    audioContextRef.current = audioContext;
+    vadSourceRef.current = source;
+    vadMuteGainRef.current = muteGain;
+
+    try {
+      await audioContext.audioWorklet.addModule("/vad-worklet.js");
+      const node = new AudioWorkletNode(audioContext, "open-gpt-live-vad");
+      node.port.onmessage = (event: MessageEvent<{ rms?: number }>) => {
+        if (typeof event.data.rms === "number") {
+          handleVadRms(event.data.rms);
+        }
+      };
+      source.connect(node);
+      node.connect(muteGain);
+      muteGain.connect(audioContext.destination);
+      vadWorkletNodeRef.current = node;
+    } catch {
+      const processor = audioContext.createScriptProcessor(2048, 1, 1);
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        handleVadRms(calculateRms(input));
+      };
+      source.connect(processor);
+      processor.connect(muteGain);
+      muteGain.connect(audioContext.destination);
+      vadScriptProcessorRef.current = processor;
+    }
+  }
+
+  function handleVadRms(rms: number): void {
+    if (!liveModeRef.current || !liveListeningRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    const playbackActive = isPlaybackActive();
+    const speechThreshold =
+      vadSpeechThreshold *
+      (playbackActive ? playbackVadThresholdMultiplier : 1);
+
+    if (
+      now < playbackVadSuppressedUntilRef.current &&
+      vadStateRef.current !== "speaking"
+    ) {
+      vadStateRef.current = "idle";
+      vadCandidateStartedAtRef.current = 0;
+      return;
+    }
+
+    if (vadStateRef.current === "idle") {
+      if (rms >= speechThreshold) {
+        vadStateRef.current = "speech_candidate";
+        vadCandidateStartedAtRef.current = now;
+      }
+      return;
+    }
+
+    if (vadStateRef.current === "speech_candidate") {
+      if (rms < vadSilenceThreshold) {
+        vadStateRef.current = "idle";
+        vadCandidateStartedAtRef.current = 0;
+        return;
+      }
+
+      if (rms >= speechThreshold && now - vadCandidateStartedAtRef.current >= vadStartDebounceMs) {
+        vadStateRef.current = "speaking";
+        vadSilenceStartedAtRef.current = 0;
+        void startLiveSpeechTurn(rms);
+      }
+      return;
+    }
+
+    if (now - liveTurnStartedAtRef.current >= vadMaxTurnMs) {
+      endLiveSpeechTurn();
+      return;
+    }
+
+    if (rms >= vadSilenceThreshold) {
+      vadSilenceStartedAtRef.current = 0;
+      return;
+    }
+
+    if (vadSilenceStartedAtRef.current === 0) {
+      vadSilenceStartedAtRef.current = now;
+      return;
+    }
+
+    if (now - vadSilenceStartedAtRef.current >= vadHangoverMs) {
+      endLiveSpeechTurn();
+    }
+  }
+
+  async function startLiveSpeechTurn(rms: number): Promise<void> {
+    const socket = socketRef.current;
+    const stream = streamRef.current;
+    if (!socket || !stream || recorderRef.current?.state === "recording") {
+      return;
+    }
+
+    const interruptedRequestId = activeRequestIdRef.current ?? getActivePlaybackRequestId();
+    if (interruptedRequestId) {
+      ignorePlaybackRequest(interruptedRequestId);
+      setActiveRequestId(null);
+      sendRaw(socket, {
+        type: WS_EVENTS.INTERRUPT,
+        requestId: interruptedRequestId,
+        reason: "live mode barge-in"
+      });
+    }
+
+    const requestId = createRequestId();
+    liveTurnStartedAtRef.current = Date.now();
+    sendRaw(socket, {
+      type: WS_EVENTS.VAD_SPEECH_START,
+      requestId,
+      turnMode: "live",
+      startedAt: liveTurnStartedAtRef.current,
+      rms
+    });
+
+    startRecorderForTurn(stream, requestId, "live");
+  }
+
+  function startRecorderForTurn(
+    stream: MediaStream,
+    requestId: string,
+    turnMode: "ptt" | "live"
+  ): void {
+    const mimeType = selectAudioMimeType();
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+    recorderRef.current = recorder;
+    audioRequestRef.current = requestId;
+    currentTurnModeRef.current = turnMode;
+    audioMimeTypeRef.current = recorder.mimeType || mimeType || "audio/webm";
+    audioSequenceRef.current = 0;
+    pendingChunkSendsRef.current = [];
+    setActiveRequestId(requestId);
+    setRecording(true);
+    setRecordingStatus(turnMode === "live" ? "Listening..." : "Recording...");
+
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size === 0) {
+        return;
+      }
+
+      const sequence = audioSequenceRef.current++;
+      const sendPromise = sendAudioBlob(event.data, sequence);
+      pendingChunkSendsRef.current.push(sendPromise);
+    });
+
+    recorder.addEventListener("stop", () => {
+      void finalizeRecording();
+    });
+
+    recorder.start(recorderTimesliceMs);
+  }
+
+  function endLiveSpeechTurn(): void {
+    if (vadStateRef.current !== "speaking") {
+      return;
+    }
+
+    vadStateRef.current = "idle";
+    vadCandidateStartedAtRef.current = 0;
+    vadSilenceStartedAtRef.current = 0;
+    stopRecording();
+  }
+
+  async function getAudioInputStream(): Promise<MediaStream> {
+    return navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+  }
+
+  function cleanupLiveMode(): void {
+    liveModeRef.current = false;
+    liveListeningRef.current = false;
+    cleanupVadPipeline();
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+    cleanupRecording(true);
+    vadStateRef.current = "idle";
+    vadCandidateStartedAtRef.current = 0;
+    vadSilenceStartedAtRef.current = 0;
+    liveTurnStartedAtRef.current = 0;
+  }
+
+  function cleanupVadPipeline(): void {
+    vadWorkletNodeRef.current?.port.close();
+    vadWorkletNodeRef.current?.disconnect();
+    vadWorkletNodeRef.current = null;
+    if (vadScriptProcessorRef.current) {
+      vadScriptProcessorRef.current.onaudioprocess = null;
+      vadScriptProcessorRef.current.disconnect();
+      vadScriptProcessorRef.current = null;
+    }
+    vadSourceRef.current?.disconnect();
+    vadSourceRef.current = null;
+    vadMuteGainRef.current?.disconnect();
+    vadMuteGainRef.current = null;
+    void audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+  }
+
+  function isPlaybackActive(): boolean {
+    const audio = currentAudioRef.current;
+    if (audio && !audio.paused && !audio.ended) {
+      return true;
+    }
+
+    for (const queue of playbackQueuesRef.current.values()) {
+      if (queue.playing) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function getActivePlaybackRequestId(): string | null {
+    for (const queue of playbackQueuesRef.current.values()) {
+      if (queue.playing) {
+        return queue.requestId;
+      }
+    }
+
+    return null;
   }
 
   function getOrCreatePlaybackQueue(requestId: string): PlaybackQueue {
@@ -439,6 +832,8 @@ export default function Home() {
 
     const finish = () => {
       cleanupAudioObjectUrl(objectUrl);
+      playbackVadSuppressedUntilRef.current =
+        Date.now() + playbackVadSuppressAfterEndMs;
       if (currentAudioRef.current === audio) {
         currentAudioRef.current = null;
         currentAudioObjectUrlRef.current = null;
@@ -560,7 +955,10 @@ export default function Home() {
           <p className="empty">Send a text message to start the session.</p>
         ) : (
           messages.map((message) => (
-            <article className={`message ${message.role}`} key={message.id}>
+            <article
+              className={`message ${message.role}${message.transient ? " transient" : ""}`}
+              key={message.id}
+            >
               <strong>{message.role === "user" ? "You" : "Assistant"}</strong>
               {message.source === "audio" ? <span>transcribed speech</span> : null}
               <p>{message.content || "..."}</p>
@@ -595,9 +993,21 @@ export default function Home() {
           Send
         </button>
         <button
+          className={liveMode ? "recording" : "secondary"}
+          type="button"
+          disabled={!connected || recording}
+          onClick={() => {
+            void toggleLiveMode();
+          }}
+        >
+          {liveMode ? "Live on" : "Live experimental"}
+        </button>
+        <button
           className={recording ? "recording" : "secondary"}
           type="button"
-          disabled={!connected || (Boolean(activeRequestId) && !recording)}
+          disabled={
+            liveMode || !connected || (Boolean(activeRequestId) && !recording)
+          }
           onPointerDown={(event) => {
             event.preventDefault();
             void startRecording();
@@ -658,4 +1068,14 @@ function base64ToUint8Array(value: string): Uint8Array {
   }
 
   return bytes;
+}
+
+function calculateRms(samples: Float32Array): number {
+  let sumSquares = 0;
+
+  for (let index = 0; index < samples.length; index += 1) {
+    sumSquares += samples[index] * samples[index];
+  }
+
+  return Math.sqrt(sumSquares / samples.length);
 }
