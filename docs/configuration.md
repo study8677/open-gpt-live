@@ -44,6 +44,15 @@ TTS_ENABLED=true
 
 Live Mode sends 24 kHz mono PCM16 frames through the Gateway. The default Realtime adapter follows OpenAI's official [Realtime transcription guide](https://developers.openai.com/api/docs/guides/realtime-transcription). If the Realtime connection fails, the Gateway wraps the accumulated PCM in a WAV container and falls back to the batch STT adapter for the final transcript.
 
+### Local AI without cloud credentials
+
+```bash
+cp .env.local-ai.example .env
+docker compose --profile local-ai up --build
+```
+
+This experimental profile points the HTTP adapters at Ollama and Speaches. Explicit non-OpenAI HTTP base URLs may omit credentials and the adapters omit the `Authorization` header. Hosted `api.openai.com` URLs still require credentials. Realtime STT remains disabled because this profile only claims the OpenAI-compatible HTTP contracts, not the OpenAI Realtime WebSocket protocol. See [local-ai.md](local-ai.md) for models, health checks, data boundaries, and the pending real-device acceptance work.
+
 ## Gateway
 
 | Variable | Default | Purpose |
@@ -52,7 +61,7 @@ Live Mode sends 24 kHz mono PCM16 frames through the Gateway. The default Realti
 | `GATEWAY_PORT` | `8787` | Shared port for WebSocket sessions and `/healthz`. |
 | `ALLOWED_ORIGINS` | empty | Comma-separated exact HTTP(S) browser origins allowed to open WebSockets. Empty allows all origins for local development. |
 | `LOG_LEVEL` | `info` | Minimum structured log level: `debug`, `info`, `warn`, or `error`. |
-| `OPENAI_API_KEY` | none | Required LLM credential. Required at startup when `NODE_ENV=production`. |
+| `OPENAI_API_KEY` | none | LLM credential. Required for `api.openai.com`; optional for an explicit self-hosted HTTP base URL. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible HTTP base URL used by the LLM and fallback providers. |
 | `OPENAI_MODEL` | `gpt-4o-mini` | Chat Completions model. |
 
@@ -60,7 +69,7 @@ Live Mode sends 24 kHz mono PCM16 frames through the Gateway. The default Realti
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `STT_API_KEY` | `OPENAI_API_KEY` | Optional STT-specific credential. |
+| `STT_API_KEY` | `OPENAI_API_KEY` | STT-specific credential. Required for hosted OpenAI; optional for an explicit self-hosted HTTP base URL. |
 | `STT_BASE_URL` | `OPENAI_BASE_URL` | Batch transcription API base URL. |
 | `STT_MODEL` | `whisper-1` | Batch transcription model used for push-to-talk and fallback. |
 
@@ -81,7 +90,7 @@ Realtime STT expects PCM16, mono, 24 kHz input. It is an explicit opt-in because
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `TTS_ENABLED` | enabled when a key exists | Explicitly enable or disable spoken replies. Set `false` for text-only replies while keeping the LLM active. |
-| `TTS_API_KEY` | `OPENAI_API_KEY` | Optional TTS-specific credential. |
+| `TTS_API_KEY` | `OPENAI_API_KEY` | TTS-specific credential. Required for hosted OpenAI; optional for an explicit self-hosted HTTP base URL. |
 | `TTS_BASE_URL` | `OPENAI_BASE_URL` | Speech API base URL. |
 | `TTS_MODEL` | `tts-1` | Speech model. |
 | `TTS_VOICE` | `alloy` | Voice sent to the provider. |
@@ -120,7 +129,7 @@ The current `SpeechDetector` implementation deliberately remains lightweight RMS
 
 ## Startup validation
 
-When `NODE_ENV=production`, the Gateway fails fast if `OPENAI_API_KEY` is absent. It also rejects invalid ports, booleans, log levels, HTTP(S) origin syntax, and Realtime delay values before accepting traffic.
+When `NODE_ENV=production`, the Gateway fails fast when an HTTP provider points at `api.openai.com` without its applicable credential. Explicit self-hosted HTTP provider URLs can run without a key. Realtime STT still requires `STT_API_KEY` or `OPENAI_API_KEY` when enabled. The Gateway also rejects invalid ports, booleans, log levels, HTTP(S) origin syntax, and Realtime delay values before accepting traffic.
 
 `ALLOWED_ORIGINS` is a browser-origin allowlist, not an authentication mechanism. WebSocket clients that do not send an `Origin` header are allowed so CLI and native clients still work.
 

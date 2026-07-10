@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.gateway
     env_file:
-      - .env
+      - ${OPEN_GPT_LIVE_ENV_FILE:-.env}
     environment:
       NODE_ENV: production
       GATEWAY_HOST: 0.0.0.0
@@ -12,6 +12,13 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
     ports:
       - "8787:8787"
+    depends_on:
+      ollama-model:
+        condition: service_completed_successfully
+        required: false
+      speaches-models:
+        condition: service_completed_successfully
+        required: false
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/healthz"]
       interval: 10s
@@ -47,3 +54,66 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.30.8}
+    profiles: ["local-ai"]
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-15m}
+    ports:
+      - "127.0.0.1:${LOCAL_AI_OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  ollama-model:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.30.8}
+    profiles: ["local-ai"]
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/ollama"]
+    command: ["pull", "${OLLAMA_MODEL:-qwen2.5:1.5b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:${SPEACHES_IMAGE_TAG:-0.8.3-cpu}
+    profiles: ["local-ai"]
+    ports:
+      - "127.0.0.1:${LOCAL_AI_SPEACHES_PORT:-8000}:8000"
+    volumes:
+      - speaches-cache:/home/ubuntu/.cache/huggingface/hub
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  speaches-models:
+    image: ghcr.io/speaches-ai/speaches:${SPEACHES_IMAGE_TAG:-0.8.3-cpu}
+    profiles: ["local-ai"]
+    restart: "no"
+    environment:
+      SPEACHES_BASE_URL: http://speaches:8000
+      STT_MODEL: ${STT_MODEL:-Systran/faster-whisper-small}
+      TTS_MODEL: ${TTS_MODEL:-speaches-ai/Kokoro-82M-v1.0-ONNX}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        uv run speaches-cli model download "$${STT_MODEL}" &&
+        uv run speaches-cli model download "$${TTS_MODEL}"
+    depends_on:
+      speaches:
+        condition: service_healthy
+
+volumes:
+  ollama-data:
+  speaches-cache:

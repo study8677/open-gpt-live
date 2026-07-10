@@ -15,6 +15,15 @@ and the project uses semantic versioning while it remains pre-1.0.
 - Adaptive browser RMS VAD with initial noise calibration, idle-only noise-floor
   tracking, dynamic dual thresholds, turn guards, fixed-threshold fallback, and
   a live diagnostics panel.
+- An opt-in, pinned `local-ai` Compose profile for Ollama, faster-whisper STT,
+  and Kokoro TTS, including automatic model initialization, provider health
+  checks, bilingual setup guides, and a host-side contract smoke script.
+
+### Changed
+
+- OpenAI-compatible HTTP adapters now support explicit keyless self-hosted base
+  URLs without sending an `Authorization` header. Hosted `api.openai.com`
+  endpoints retain strict credential validation.
 
 ## 0.2.0 - 2026-07-10
 

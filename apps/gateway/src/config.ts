@@ -1,4 +1,7 @@
-import type { OpenAIRealtimeTranscriptionDelay } from "@open-gpt-live/adapters";
+import {
+  isOpenAIHostedUrl,
+  type OpenAIRealtimeTranscriptionDelay
+} from "@open-gpt-live/adapters";
 
 export interface GatewayRuntimeConfig {
   host: string;
@@ -27,18 +30,37 @@ export function loadGatewayRuntimeConfig(
   const port = parseInteger(env.GATEWAY_PORT, 8787, "GATEWAY_PORT", 0, 65_535);
   const production = env.NODE_ENV === "production";
   const openAiApiKey = nonEmpty(env.OPENAI_API_KEY);
-  if (production && !openAiApiKey) {
-    throw new Error("OPENAI_API_KEY is required when NODE_ENV=production");
+  const openAiBaseUrl =
+    nonEmpty(env.OPENAI_BASE_URL) ?? "https://api.openai.com/v1";
+  const sttApiKey = nonEmpty(env.STT_API_KEY) ?? openAiApiKey;
+  const sttBaseUrl = nonEmpty(env.STT_BASE_URL) ?? openAiBaseUrl;
+  const ttsApiKey = nonEmpty(env.TTS_API_KEY) ?? openAiApiKey;
+  const ttsBaseUrl = nonEmpty(env.TTS_BASE_URL) ?? openAiBaseUrl;
+
+  if (production && isOpenAIHostedUrl(openAiBaseUrl) && !openAiApiKey) {
+    throw new Error(
+      "OPENAI_API_KEY is required for api.openai.com when NODE_ENV=production"
+    );
+  }
+  if (production && isOpenAIHostedUrl(sttBaseUrl) && !sttApiKey) {
+    throw new Error(
+      "STT_API_KEY or OPENAI_API_KEY is required for api.openai.com when NODE_ENV=production"
+    );
   }
 
   const ttsEnabled = parseBoolean(
     env.TTS_ENABLED,
-    Boolean(nonEmpty(env.TTS_API_KEY) ?? openAiApiKey),
+    Boolean(ttsApiKey),
     "TTS_ENABLED"
   );
-  if (ttsEnabled && !nonEmpty(env.TTS_API_KEY) && !openAiApiKey) {
+  if (
+    production &&
+    ttsEnabled &&
+    isOpenAIHostedUrl(ttsBaseUrl) &&
+    !ttsApiKey
+  ) {
     throw new Error(
-      "TTS_ENABLED requires TTS_API_KEY or OPENAI_API_KEY"
+      "TTS_API_KEY or OPENAI_API_KEY is required for api.openai.com when TTS_ENABLED=true"
     );
   }
 
@@ -47,7 +69,7 @@ export function loadGatewayRuntimeConfig(
     false,
     "STT_REALTIME_ENABLED"
   );
-  if (realtimeSttEnabled && !nonEmpty(env.STT_API_KEY) && !openAiApiKey) {
+  if (realtimeSttEnabled && !sttApiKey) {
     throw new Error(
       "STT_REALTIME_ENABLED requires STT_API_KEY or OPENAI_API_KEY"
     );

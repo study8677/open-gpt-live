@@ -22,7 +22,7 @@ Start the already-built processes together:
 pnpm start
 ```
 
-The Gateway requires `OPENAI_API_KEY` in production. Configuration is documented in [configuration.md](configuration.md).
+The Gateway requires credentials in production when a provider points at `api.openai.com`. Explicit self-hosted HTTP providers can run without a key. Configuration is documented in [configuration.md](configuration.md).
 
 ## Health check
 
@@ -61,6 +61,8 @@ This uses `Dockerfile.gateway`, `Dockerfile.web`, and the root `docker-compose.y
 - Gateway WebSocket: `ws://localhost:8787`
 
 `NEXT_PUBLIC_GATEWAY_WS_URL` is compiled into the Web image. Set its Docker build argument to the public `wss://` address when deploying anywhere other than localhost.
+
+For the experimental keyless Ollama + Speaches profile, copy `.env.local-ai.example` and run `docker compose --profile local-ai up --build`. The pinned models, initialization jobs, health checks, host-only provider ports, and pending real-hardware acceptance are documented in [local-ai.md](local-ai.md). The provider profile is opt-in; normal `docker compose up --build` does not start Ollama or Speaches.
 
 ## Reverse proxy
 

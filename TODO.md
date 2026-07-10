@@ -138,30 +138,32 @@
 
 ### 技术路线
 
-- LLM：优先复用当前 OpenAI-compatible Adapter 连接 Ollama。
-- STT：评估 LocalAI、faster-whisper 或其他提供 HTTP 接口的本地服务。
-- TTS：选择能够稳定输出浏览器可播放格式的开源服务。
-- 编排：提供 `docker compose --profile local-ai up`。
+- LLM：复用当前 OpenAI-compatible Adapter，连接 Ollama `0.30.8` 和 `qwen2.5:1.5b`。
+- STT：使用 Speaches `0.8.3-cpu` 暴露 `Systran/faster-whisper-small` 批式转写。
+- TTS：使用同一 Speaches 服务暴露 Kokoro 82M，并输出浏览器可播放 MP3。
+- 编排：提供 `docker compose --profile local-ai up --build`，首次启动自动下载模型。
 
 ### 实现 TODO
 
-- [ ] 验证 Ollama OpenAI-compatible 接口与当前 LLM Adapter 的兼容性。
-- [ ] 记录首个推荐 LLM 模型、内存需求和下载方式。
-- [ ] 在候选 STT 中选择一个默认方案，并验证中文和英文短句。
-- [ ] 在候选 TTS 中选择一个默认方案，并验证首音延迟和浏览器格式。
-- [ ] 为本地 Provider 增加健康检查和明确的启动失败信息。
-- [ ] 新增 Compose `local-ai` profile，不影响默认云端配置。
-- [ ] 提供不包含密钥的 `.env.local-ai.example`。
-- [ ] 文档说明模型体积、首次下载时间、CPU/GPU 差异和数据边界。
-- [ ] 增加一条本地端到端冒烟流程。
-- [ ] 自动化测试继续使用 Mock，不要求 CI 下载大模型。
+- [x] 按 Ollama 官方 Chat Completions 形状增加当前 LLM Adapter 的流式契约测试。
+- [x] 记录推荐 LLM 模型、下载体积、启动方式和资源边界。
+- [x] 锁定 multilingual faster-whisper small，并增加批式 STT HTTP 契约测试。
+- [ ] 使用真实本地模型验证 STT 中文和英文短句。
+- [x] 锁定 Kokoro 82M、中文 voice 和 MP3 格式，并增加 TTS HTTP 契约测试。
+- [ ] 使用真实本地模型测量 TTS 首音延迟并试听中英文音质。
+- [x] 为本地 Provider 增加健康检查、模型初始化任务和冒烟脚本错误信息。
+- [x] 新增 Compose `local-ai` profile，不影响默认云端服务集合。
+- [x] 提供不包含任何云端密钥的 `.env.local-ai.example`。
+- [x] 文档说明模型体积、首次下载、CPU 基线、数据边界和许可证边界。
+- [x] 增加覆盖 LLM → TTS → STT 的本地 Provider 冒烟脚本。
+- [x] 自动化测试继续使用 Mock，不要求 CI 下载镜像或大模型。
 
 ### 验收标准
 
 - [ ] 新用户按照文档可以在不配置云端 Key 的情况下启动完整链路。
 - [ ] 文字、PTT 和 Live Mode 至少各完成一次本地模型对话。
 - [ ] 停止、插话、断线和 Provider 重启仍保持现有生命周期语义。
-- [ ] 默认 Docker/云端运行方式不因 local-ai profile 发生回归。
+- [x] 默认 Compose 配置只包含 Gateway/Web，并由 CI 静态校验默认与 local-ai 两个配置。
 
 ## 横向 P0：GitHub 可检索性与高星仓库准备度
 
@@ -214,11 +216,11 @@ Open-source realtime voice AI with natural turn-taking, streaming speech, Ollama
 - [ ] 增加 10–20 秒真实语音演示，展示说话、临时转写、回答、播放和插话。
 - [ ] 演示同时显示延迟面板，证明结果来自真实链路而不是静态 UI。
 - [ ] 增加 v0.2/v0.3 benchmark 表，公开测试设备、模型、网络和测量口径。
-- [ ] 增加“为什么选择 OpenGPT Live”对比表，突出开放协议、Provider 可替换、本地部署和可观测轮次。
-- [ ] local-ai 完成后，把“无 OpenAI Key 本地运行”放到 Quickstart 附近。
+- [x] 增加“为什么选择 OpenGPT Live”对比表，突出开放协议、Provider 可替换和本地部署边界。
+- [x] 把“无 OpenAI Key 本地运行”放到 Quickstart 附近，并明确真实模型验收待完成。
 - [x] 增加 Provider 支持矩阵，区分 Stable、Experimental 和 Planned。
 - [ ] 所有复制命令在干净环境实际执行，不提供无法复现的营销命令。
-- [ ] 添加 FAQ：浏览器支持、隐私边界、回声、模型兼容和与托管方案的区别。
+- [x] 添加 FAQ：本地 Key、浏览器支持、数据边界、回声和本地临时转写限制。
 - [x] 生成并视觉验证 1280×640 Social Preview 源文件和 PNG。
 - [ ] Chrome 开启文件网址访问权限后，将 PNG 上传到 GitHub Social Preview。
 - [ ] 有稳定部署地址后设置 GitHub homepage；没有公开 Demo 前不放失效链接。
@@ -240,7 +242,7 @@ Open-source realtime voice AI with natural turn-taking, streaming speech, Ollama
 
 - [ ] 延迟指标完成后：README 加入真实 benchmark 和测量方法。
 - [ ] VAD 完成后：发布优化前后相同环境的轮次对比视频和数据。
-- [ ] local-ai 完成后：发布无云端 Key Quickstart、Provider 矩阵和资源需求。
+- [x] 发布无云端 Key Quickstart、Provider 矩阵和资源需求，同时保留实验性标记。
 - [ ] 每个迭代都同步更新 description/topics，禁止提前宣传尚未验收的能力。
 
 ### 增长与质量指标
@@ -302,9 +304,10 @@ Open-source realtime voice AI with natural turn-taking, streaming speech, Ollama
 
 ### 第三个迭代：本地 AI profile
 
-- [ ] 先锁定一个可复现的 LLM、STT 和 TTS 组合。
-- [ ] 再完成 Compose、文档和本地端到端验收。
-- [ ] 同步更新 description/topics、本地 Quickstart、Provider 矩阵和 Release 内容。
+- [x] 锁定一个固定镜像与模型版本的 LLM、STT 和 TTS 组合。
+- [x] 完成 Compose、双语文档、契约测试和可重复冒烟脚本。
+- [ ] 下载真实模型并完成文字、PTT、Live、本地音质和中断验收。
+- [ ] 真实验收后再同步更新 description/topics 和 Release 内容。
 
 ### 贯穿三个迭代：仓库增长基础设施
 

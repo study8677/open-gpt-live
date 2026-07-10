@@ -69,7 +69,7 @@ OpenGPT Live 是一份可自托管的实时语音 AI 参考实现，位于浏览
 | 批式 STT | OpenAI-compatible transcription API | 稳定 |
 | 流式 STT | OpenAI Realtime transcription | 实验性 |
 | TTS | OpenAI-compatible speech API | 稳定 |
-| 本地 AI | Ollama + 开源 STT/TTS profile | v0.3 计划中 |
+| 本地 AI | 固定版本的 Ollama + Speaches/faster-whisper/Kokoro profile | 实验性；契约已测试，真实模型验收待完成 |
 
 ## 为什么值得做
 
@@ -77,6 +77,13 @@ OpenGPT Live 是一份可自托管的实时语音 AI 参考实现，位于浏览
 - **模型可替换**：LLM、批式 STT、流式 STT 和 TTS 都在独立 Provider 接口之后。
 - **过程可观察**：临时转写、最终转写、文字增量、音频分块、完成、中断和错误都有明确事件。
 - **边界诚实**：这是语音会话层参考实现，不是托管助手、计费平台或万能 Agent 框架。
+
+| | OpenGPT Live | 常见托管语音 API |
+| --- | --- | --- |
+| 会话协议 | 可检查的 TypeScript 事件 | 由 Provider 定义 |
+| 模型路由 | 可替换 LLM/STT/TTS Adapter | 通常绑定单个平台 |
+| 本地推理 | 实验性 Ollama + 开源语音 profile | 通常以云端为主 |
+| 运维责任 | 自己掌控部署和调优 | Provider 负责基础设施 |
 
 ## 5 分钟快速开始
 
@@ -100,6 +107,17 @@ pnpm dev
 ```
 
 打开 [http://localhost:3000](http://localhost:3000)。Gateway 健康检查位于 [http://localhost:8787/healthz](http://localhost:8787/healthz)。
+
+### 不使用云端 Key 的本地 AI
+
+实验性的 Docker profile 使用 Ollama 作为 LLM，使用 Speaches 提供开源 faster-whisper STT 和 Kokoro TTS：
+
+```bash
+cp .env.local-ai.example .env
+docker compose --profile local-ai up --build
+```
+
+第一次启动约需下载 1.8 GB 模型权重，另外还会下载容器镜像。它不需要 OpenAI Key，但真实麦克风和本地模型验收仍待完成。健康检查、Provider 冒烟脚本、资源说明和浏览器验收步骤见[本地 AI 中文文档](docs/local-ai.zh-CN.md)。
 
 ### 常用模式
 
@@ -171,10 +189,23 @@ GitHub Actions 会在每次推送和 Pull Request 中执行类型检查、测试
 
 这些限制是有意保留的。更上层的 Agent 能力应该建立在可测量、可信的语音闭环之上。
 
+## 常见问题
+
+**可以不使用 OpenAI Key 吗？** 可以。实验性本地 profile 使用 Ollama、faster-whisper 和 Kokoro；真实设备验收清单仍未全部完成。
+
+**本地 Live Mode 有临时转写吗？** 暂时没有。本地链路在一轮说完后执行批式 STT；当前已实现的临时转写路径仍是 OpenAI Realtime。
+
+**应该使用哪个浏览器？** 已验证基线是 Chromium。Firefox 和 Safari 需要按[浏览器支持说明](docs/browser-support.md)继续验收。
+
+**动态 VAD 能彻底解决回声吗？** 不能。它会校准环境噪声并改进轮次时机，但不等于声学回声消除，也不是语音分类模型。
+
+**对话数据保存在哪里？** 会话历史只保存在当前 WebSocket 连接对应的 Gateway 内存中。本地 profile 会把推理请求发往本机容器，但首次下载镜像和模型仍会访问外部仓库。
+
 ## 文档
 
 - [WebSocket 协议](docs/protocol.md)
 - [配置参考](docs/configuration.md)
+- [本地 AI 配置](docs/local-ai.zh-CN.md)
 - [Live Mode 冒烟测试](docs/live-mode-smoke-test.md)
 - [浏览器支持](docs/browser-support.md)
 - [生产部署](docs/deployment.md)

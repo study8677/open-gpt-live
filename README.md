@@ -69,7 +69,7 @@ OpenGPT Live is a self-hostable realtime voice AI reference implementation for t
 | Batch STT | OpenAI-compatible transcription API | Stable |
 | Streaming STT | OpenAI Realtime transcription | Experimental |
 | TTS | OpenAI-compatible speech API | Stable |
-| Local AI | Ollama + open-source STT/TTS profile | Planned for v0.3 |
+| Local AI | Pinned Ollama + Speaches/faster-whisper/Kokoro profile | Experimental; contract-tested, real-model acceptance pending |
 
 ## Why this project
 
@@ -77,6 +77,13 @@ OpenGPT Live is a self-hostable realtime voice AI reference implementation for t
 - **Replaceable models** — LLM, batch STT, streaming STT, and TTS live behind provider interfaces.
 - **Observable turns** — partial transcript, final transcript, text delta, audio chunk, completion, interruption, and error are explicit events.
 - **Honest boundaries** — this repository is a voice-session reference implementation, not a hosted assistant or billing platform.
+
+| | OpenGPT Live | Typical managed voice API |
+| --- | --- | --- |
+| Session protocol | Inspectable TypeScript events | Provider-defined |
+| Model routing | Replaceable LLM/STT/TTS adapters | Usually tied to one platform |
+| Local inference | Experimental Ollama + open-source speech profile | Usually cloud-first |
+| Operations | You own deployment and tuning | Provider owns infrastructure |
 
 ## 5-minute quickstart
 
@@ -100,6 +107,17 @@ pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Gateway health is available at [http://localhost:8787/healthz](http://localhost:8787/healthz).
+
+### Local AI without a cloud key
+
+The experimental Docker profile uses Ollama for the LLM and Speaches for open-source faster-whisper STT plus Kokoro TTS:
+
+```bash
+cp .env.local-ai.example .env
+docker compose --profile local-ai up --build
+```
+
+The first start downloads about 1.8 GB of model weights plus container images. It requires no OpenAI key, but real microphone and local-model acceptance is still pending. See the [local AI guide](docs/local-ai.md) for health checks, the provider smoke script, resource notes, and the exact browser checklist.
 
 ### Useful profiles
 
@@ -171,10 +189,23 @@ GitHub Actions runs type checking, tests, and production builds for every push a
 
 These constraints are intentional. The next product layer should be built on a voice loop that is measurable and reliable.
 
+## FAQ
+
+**Can it run without an OpenAI key?** Yes. The experimental local profile uses Ollama, faster-whisper, and Kokoro; its real-device acceptance checklist is still open.
+
+**Does local Live Mode produce partial transcripts?** Not yet. It uses batch STT after the turn ends. OpenAI Realtime remains the currently implemented partial-transcript path.
+
+**Which browser should I use?** Chromium is the verified baseline. Firefox and Safari need the checks documented in [browser-support.md](docs/browser-support.md).
+
+**Does adaptive VAD solve echo?** No. It calibrates ambient noise and improves turn timing, but it is not acoustic echo cancellation or a speech-classification model.
+
+**Where is conversation data stored?** Session history stays in Gateway memory for the active WebSocket connection. The local profile routes inference through local containers; initial image and model downloads still contact external registries.
+
 ## Documentation
 
 - [WebSocket protocol](docs/protocol.md)
 - [Configuration reference](docs/configuration.md)
+- [Local AI profile](docs/local-ai.md)
 - [Live Mode smoke test](docs/live-mode-smoke-test.md)
 - [Browser support](docs/browser-support.md)
 - [Production deployment](docs/deployment.md)
