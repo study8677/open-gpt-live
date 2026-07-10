@@ -81,6 +81,7 @@ Open [http://localhost:3000](http://localhost:3000), then test in this order:
 
 - For an English TTS voice, set `TTS_VOICE=af_heart`; the default `zf_xiaobei` is Mandarin.
 - To trade answer quality for a smaller download, change both `OPENAI_MODEL` and `OLLAMA_MODEL`. They must name the same installed Ollama model.
+- The first answer after Ollama loads a model can be much slower than warm turns. `OLLAMA_KEEP_ALIVE=15m` is the profile default; tune it against available memory instead of treating a cold-start result as steady-state latency.
 - If native Ollama or another service already uses a host port, change `LOCAL_AI_OLLAMA_PORT` or `LOCAL_AI_SPEACHES_PORT` and update the matching `LOCAL_AI_*_URL` used by the smoke script. Container-to-container Provider URLs do not change.
 - When running the Gateway directly on the host instead of in Compose, change provider hosts from `ollama` and `speaches` to `localhost`.
 - The profile binds unauthenticated provider ports to `127.0.0.1`. Do not expose them publicly without network controls and authentication.

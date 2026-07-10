@@ -81,6 +81,7 @@ docker compose --profile local-ai run --rm speaches-models
 
 - 英文 TTS 可改为 `TTS_VOICE=af_heart`；默认 `zf_xiaobei` 是中文女声。
 - 如果需要更小的 LLM，同时修改 `OPENAI_MODEL` 和 `OLLAMA_MODEL`，两者必须指向同一个已安装 Ollama 模型。
+- Ollama 首次加载模型后的第一轮可能明显慢于暖机轮次。profile 默认设置 `OLLAMA_KEEP_ALIVE=15m`；应根据可用内存调节，不要把冷启动结果当成稳态延迟。
 - 如果本机 Ollama 或其他服务已经占用端口，可以修改 `LOCAL_AI_OLLAMA_PORT` 或 `LOCAL_AI_SPEACHES_PORT`，并同步修改冒烟脚本使用的 `LOCAL_AI_*_URL`。容器之间的 Provider URL 不需要变化。
 - 如果 Gateway 不在 Compose 中，而是直接运行在宿主机，把 Provider 主机名从 `ollama`、`speaches` 改为 `localhost`。
 - 本地 Provider 没有鉴权，profile 只把端口绑定到 `127.0.0.1`。不要在没有网络控制与鉴权时公开暴露。

@@ -146,6 +146,7 @@
 ### 实现 TODO
 
 - [x] 按 Ollama 官方 Chat Completions 形状增加当前 LLM Adapter 的流式契约测试。
+- [x] 使用默认 `qwen2.5:1.5b` 完成真实无 Key Gateway WebSocket 文字轮次，并确认冷启动与暖机延迟差异。
 - [x] 记录推荐 LLM 模型、下载体积、启动方式和资源边界。
 - [x] 锁定 multilingual faster-whisper small，并增加批式 STT HTTP 契约测试。
 - [ ] 使用真实本地模型验证 STT 中文和英文短句。
@@ -178,8 +179,8 @@ Star 数量无法被工程任务直接保证；本阶段优化的是被发现、
 
 ### 当前线上基线
 
-- 已更新英文 GitHub description，准确覆盖 realtime voice AI、streaming STT、browser VAD、interruptible TTS 和 typed WebSocket gateway。
-- 已配置 13 个与当前实现一致的 topics；`ollama` 和 `local-ai` 等能力验收后再加入。
+- 已更新英文 GitHub description，准确覆盖 adaptive VAD、latency telemetry、interruptible TTS、TypeScript WebSocket gateway 和实验性 local AI。
+- 已配置 16 个与当前实现一致的 topics，包含 `ollama`、`local-ai` 和 `faster-whisper`。
 - 已有 MIT License、双语 README、架构说明、截图和 CI。
 - 已开启 GitHub Discussions，并在当前分支补齐贡献指南、安全策略、Issue 模板和 PR 模板。
 - 暂无项目 homepage/在线 Demo；没有稳定公开地址前不设置失效链接。
@@ -187,27 +188,21 @@ Star 数量无法被工程任务直接保证；本阶段优化的是被发现、
 
 ### GitHub description
 
-在能力尚未交付前使用真实、不过度承诺的描述：
+当前线上使用真实、不过度承诺的描述：
 
 ```text
-Open-source realtime voice AI with streaming STT, browser VAD, interruptible TTS, and a typed WebSocket gateway for OpenAI-compatible models.
+Open-source realtime voice AI with adaptive VAD, latency telemetry, interruptible TTS, an inspectable TypeScript WebSocket gateway, and experimental Ollama/local AI.
 ```
 
 - [x] 当前能力 description 已应用到 GitHub About。
-
-等 local-ai 和 v0.3 验收完成后再升级为：
-
-```text
-Open-source realtime voice AI with natural turn-taking, streaming speech, Ollama/local AI support, and an inspectable TypeScript WebSocket gateway.
-```
 
 ### GitHub topics
 
 - [x] 保留当前真实 topics：`voice-ai`、`realtime-ai`、`speech-to-text`、`websocket`、`typescript`、`nextjs`、`openai`、`llm`。
 - [x] 补充已实现能力：`text-to-speech`、`voice-activity-detection`、`streaming`、`audio`、`self-hosted`。
-- [ ] 只有 local-ai profile 验收后再加入：`ollama`、`local-ai`。
+- [x] local-ai Compose、契约测试和真实 Ollama 文字冒烟完成后加入：`ollama`、`local-ai`、`faster-whisper`，并保留实验性说明。
 - [x] Topics 控制在 12–16 个高相关词，不使用与实现无关的热门关键词。
-- [ ] v0.3 发布前通过 GitHub API 复核线上 description 和 topics。
+- [x] 通过 GitHub API 复核线上 description 和 16 个 topics。
 
 ### README 和演示
 
@@ -243,7 +238,7 @@ Open-source realtime voice AI with natural turn-taking, streaming speech, Ollama
 - [ ] 延迟指标完成后：README 加入真实 benchmark 和测量方法。
 - [ ] VAD 完成后：发布优化前后相同环境的轮次对比视频和数据。
 - [x] 发布无云端 Key Quickstart、Provider 矩阵和资源需求，同时保留实验性标记。
-- [ ] 每个迭代都同步更新 description/topics，禁止提前宣传尚未验收的能力。
+- [x] 每个已交付迭代都同步更新 description/topics，并对未完成真实设备验收的 local AI 保留实验性说明。
 
 ### 增长与质量指标
 
@@ -255,11 +250,11 @@ Open-source realtime voice AI with natural turn-taking, streaming speech, Ollama
 
 ### 验收标准
 
-- [ ] GitHub About 区域具有准确 description、topics、license 和有效 homepage（如果已有 Demo）。
+- [x] GitHub About 区域具有准确 description、topics 和 license；当前无公开 Demo，因此不设置失效 homepage。
 - [ ] 新用户只看 README 可以选择云端或本地运行方式并完成启动。
 - [ ] 仓库存在真实语音 Demo、延迟 benchmark 和测试口径。
 - [ ] Community Profile 的主要文件和 Issue/PR 入口齐全。
-- [ ] 至少准备 3 个边界清晰、可以被外部贡献者完成的 Issue。
+- [x] 至少准备 3 个边界清晰、可以被外部贡献者完成的 Issue。
 - [ ] 本地 Markdown 链接、图片、示例命令和 GitHub Actions 全部通过验证。
 
 ## 后续队列：本轮不实现
@@ -307,21 +302,21 @@ Open-source realtime voice AI with natural turn-taking, streaming speech, Ollama
 - [x] 锁定一个固定镜像与模型版本的 LLM、STT 和 TTS 组合。
 - [x] 完成 Compose、双语文档、契约测试和可重复冒烟脚本。
 - [ ] 下载真实模型并完成文字、PTT、Live、本地音质和中断验收。
-- [ ] 真实验收后再同步更新 description/topics 和 Release 内容。
+- [x] description/topics 已按实验性能力更新；真实全链路验收后再发布 Release。
 
 ### 贯穿三个迭代：仓库增长基础设施
 
-- [ ] 第一迭代补齐 metadata、贡献文件、Issue/PR 模板和标签体系。
+- [x] 第一迭代补齐 metadata、贡献文件、Issue/PR 模板和标签体系。
 - [ ] 第二迭代用真实 VAD 证据替换静态能力描述。
 - [ ] 第三迭代完成公开发布材料、GitHub Release 和社区启动清单。
 
 ## v0.3 完成定义
 
-- [ ] `pnpm check` 全部通过。
-- [ ] 延迟指标覆盖文字、PTT、Live、fallback、中断和错误。
+- [x] `pnpm check` 全部通过。
+- [x] 延迟指标覆盖文字、PTT、Live、fallback、中断和错误。
 - [ ] VAD 纯逻辑测试和真实麦克风验收通过。
 - [ ] local-ai profile 能完成一次无云端 Key 的完整语音对话。
-- [ ] README、配置、部署和浏览器限制文档同步更新。
+- [x] README、配置、部署和浏览器限制文档同步更新。
 - [ ] 对比记录 v0.2 与 v0.3 的延迟和轮次质量变化。
 - [ ] GitHub description、topics、Social Preview 和 homepage 与真实能力一致。
 - [ ] 真实 Demo、benchmark、Provider 矩阵和本地 Quickstart 已公开。
