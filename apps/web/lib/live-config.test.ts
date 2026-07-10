@@ -18,7 +18,7 @@ describe("resolveVadConfig", () => {
         playbackThresholdMultiplier: "3",
         playbackSuppressAfterEndMs: "400"
       })
-    ).toEqual({
+    ).toMatchObject({
       speechThreshold: 0.03,
       silenceThreshold: 0.02,
       startDebounceMs: 200,
@@ -28,6 +28,34 @@ describe("resolveVadConfig", () => {
       playbackThresholdMultiplier: 3,
       playbackSuppressAfterEndMs: 400
     });
+  });
+
+  it("resolves adaptive controls and clamps the dynamic hysteresis range", () => {
+    const config = resolveVadConfig({
+      adaptiveEnabled: "0",
+      calibrationMs: "1500",
+      noiseFloorSmoothing: "0.15",
+      speechNoiseMultiplier: "4",
+      silenceNoiseMultiplier: "2",
+      dynamicSpeechMin: "0.02",
+      dynamicSpeechMax: "0.1",
+      dynamicSilenceMin: "0.01",
+      dynamicSilenceMax: "0.2",
+      minimumSpeechMs: "450"
+    });
+
+    expect(config).toMatchObject({
+      adaptiveEnabled: false,
+      calibrationMs: 1_500,
+      noiseFloorSmoothing: 0.15,
+      speechNoiseMultiplier: 4,
+      silenceNoiseMultiplier: 2,
+      dynamicSpeechMin: 0.02,
+      dynamicSpeechMax: 0.1,
+      dynamicSilenceMin: 0.01,
+      minimumSpeechMs: 450
+    });
+    expect(config.dynamicSilenceMax).toBeCloseTo(0.09);
   });
 
   it("falls back for unsafe values and never lets pre-roll exceed hangover", () => {

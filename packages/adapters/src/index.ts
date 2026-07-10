@@ -103,14 +103,14 @@ export class OpenAILLMProvider implements LLMProvider {
     messages: LLMMessage[],
     options: ProviderCallOptions = {}
   ): AsyncIterable<LLMStreamChunk> {
-    if (!this.apiKey) {
+    if (!this.apiKey && isOpenAIHostedUrl(this.baseUrl)) {
       throw new Error("OPENAI_API_KEY is required");
     }
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        ...authorizationHeader(this.apiKey),
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -196,7 +196,7 @@ export class OpenAIWhisperProvider implements STTProvider {
     input: STTAudioInput,
     options: ProviderCallOptions = {}
   ): Promise<{ text: string }> {
-    if (!this.apiKey) {
+    if (!this.apiKey && isOpenAIHostedUrl(this.baseUrl)) {
       throw new Error("STT_API_KEY or OPENAI_API_KEY is required");
     }
 
@@ -211,7 +211,7 @@ export class OpenAIWhisperProvider implements STTProvider {
     const response = await fetch(`${this.baseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.apiKey}`
+        ...authorizationHeader(this.apiKey)
       },
       body: formData,
       signal: options.signal
@@ -258,14 +258,14 @@ export class OpenAITTSProvider implements TTSProvider {
   }
 
   get configured(): boolean {
-    return this.apiKey.length > 0;
+    return this.apiKey.length > 0 || !isOpenAIHostedUrl(this.baseUrl);
   }
 
   async *synthesize(
     input: TTSSynthesisInput,
     options: ProviderCallOptions = {}
   ): AsyncIterable<TTSStreamChunk> {
-    if (!this.apiKey) {
+    if (!this.apiKey && isOpenAIHostedUrl(this.baseUrl)) {
       throw new Error("TTS_API_KEY or OPENAI_API_KEY is required");
     }
 
@@ -273,7 +273,7 @@ export class OpenAITTSProvider implements TTSProvider {
     const response = await fetch(`${this.baseUrl}/audio/speech`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        ...authorizationHeader(this.apiKey),
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -320,6 +320,19 @@ export class OpenAITTSProvider implements TTSProvider {
       await reader.cancel().catch(() => undefined);
     }
   }
+}
+
+export function isOpenAIHostedUrl(value: string): boolean {
+  try {
+    return new URL(value).hostname.toLowerCase() === "api.openai.com";
+  } catch {
+    // Invalid provider URLs should not accidentally bypass credential checks.
+    return true;
+  }
+}
+
+function authorizationHeader(apiKey: string): Record<string, string> {
+  return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 }
 
 function stripTrailingSlash(value: string): string {

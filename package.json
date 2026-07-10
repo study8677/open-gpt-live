@@ -12,6 +12,7 @@
     "start": "NODE_ENV=production pnpm --parallel --stream --filter @open-gpt-live/gateway --filter @open-gpt-live/web start",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
+    "local-ai:check": "node --env-file=.env scripts/check-local-ai.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

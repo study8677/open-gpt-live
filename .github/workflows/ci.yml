@@ -36,5 +36,10 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Validate Docker Compose profiles
+        run: |
+          OPEN_GPT_LIVE_ENV_FILE=.env.example docker compose --env-file .env.example config --quiet
+          OPEN_GPT_LIVE_ENV_FILE=.env.local-ai.example docker compose --env-file .env.local-ai.example --profile local-ai config --quiet
+
       - name: Build
         run: pnpm build

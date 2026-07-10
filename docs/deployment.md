@@ -22,7 +22,7 @@ Start the already-built processes together:
 pnpm start
 ```
 
-The Gateway requires `OPENAI_API_KEY` in production. Configuration is documented in [configuration.md](configuration.md).
+The Gateway requires credentials in production when a provider points at `api.openai.com`. Explicit self-hosted HTTP providers can run without a key. Configuration is documented in [configuration.md](configuration.md).
 
 ## Health check
 
@@ -62,6 +62,8 @@ This uses `Dockerfile.gateway`, `Dockerfile.web`, and the root `docker-compose.y
 
 `NEXT_PUBLIC_GATEWAY_WS_URL` is compiled into the Web image. Set its Docker build argument to the public `wss://` address when deploying anywhere other than localhost.
 
+For the experimental keyless Ollama + Speaches profile, copy `.env.local-ai.example` and run `docker compose --profile local-ai up --build`. The pinned models, initialization jobs, health checks, host-only provider ports, and pending real-hardware acceptance are documented in [local-ai.md](local-ai.md). The provider profile is opt-in; normal `docker compose up --build` does not start Ollama or Speaches.
+
 ## Reverse proxy
 
 Terminate TLS at a reverse proxy and forward WebSocket upgrades to the Gateway. A minimal Nginx shape is:
@@ -93,7 +95,9 @@ This allowlist checks browser `Origin` headers; it is not authentication. Non-br
 
 ## Logs
 
-The Gateway writes one JSON object per line. Events include session connection/disconnection, request completion, Realtime STT fallback, provider failure, and audio size rejection. Logs use `sessionId` and `requestId` for correlation and redact fields whose names look like credentials, audio, transcripts, or message content.
+The Gateway writes one JSON object per line. Events include session connection/disconnection, request completion, Realtime STT fallback, provider failure, audio size rejection, and request-scoped latency. Logs use `sessionId` and `requestId` for correlation and redact fields whose names look like credentials, audio, transcripts, or message content.
+
+Latency events are `latency.stt`, `latency.llm_first_delta`, `latency.tts_first_chunk`, and the terminal `request.finished`. Duration fields end in `Ms`, are derived from the Gateway's monotonic clock, and can be aggregated by `requestKind`, `sttPath` (`batch`, `realtime`, or `batch_fallback`), and terminal `stage`. `ttsFirstChunkMs` measures audio production at the Gateway; actual browser playback is measured only by the Web latency panel.
 
 ## Production checklist
 

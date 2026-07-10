@@ -9,6 +9,43 @@ test("production config fails fast without the LLM API key", () => {
   );
 });
 
+test("production config allows keyless self-hosted HTTP providers", () => {
+  const config = loadGatewayRuntimeConfig({
+    NODE_ENV: "production",
+    OPENAI_BASE_URL: "http://ollama:11434/v1",
+    STT_BASE_URL: "http://speaches:8000/v1",
+    TTS_BASE_URL: "http://speaches:8000/v1",
+    TTS_ENABLED: "true"
+  });
+
+  assert.equal(config.ttsEnabled, true);
+  assert.equal(config.realtimeSttEnabled, false);
+});
+
+test("production config still requires credentials for hosted OpenAI STT and TTS", () => {
+  assert.throws(
+    () =>
+      loadGatewayRuntimeConfig({
+        NODE_ENV: "production",
+        OPENAI_BASE_URL: "http://ollama:11434/v1",
+        STT_BASE_URL: "https://api.openai.com/v1"
+      }),
+    /STT_API_KEY or OPENAI_API_KEY is required for api\.openai\.com/
+  );
+
+  assert.throws(
+    () =>
+      loadGatewayRuntimeConfig({
+        NODE_ENV: "production",
+        OPENAI_BASE_URL: "http://ollama:11434/v1",
+        STT_BASE_URL: "http://speaches:8000/v1",
+        TTS_BASE_URL: "https://api.openai.com/v1",
+        TTS_ENABLED: "true"
+      }),
+    /TTS_API_KEY or OPENAI_API_KEY is required for api\.openai\.com/
+  );
+});
+
 test("runtime config parses realtime STT, text-only TTS, and origins", () => {
   const config = loadGatewayRuntimeConfig({
     NODE_ENV: "production",

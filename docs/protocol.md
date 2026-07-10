@@ -15,6 +15,20 @@ The push-to-talk path records a whole turn, aggregates MediaRecorder chunks in t
 Live Mode uses browser-side VAD to mark speech boundaries while reusing the same `audio.chunk` channel. The AudioWorklet continuously produces 24 kHz mono PCM16 frames and the browser keeps a short pre-roll before VAD confirmation. When Realtime STT is enabled, the Gateway forwards those frames incrementally and maps provider deltas to `transcript.partial`. If Realtime STT is disabled or fails, the Gateway can periodically transcribe the accumulated audio and always uses batch STT as the final fallback.
 The TTS output path segments the assistant text and streams MP3 chunks back to the browser for queued playback.
 
+## Latency measurements
+
+The Web app keeps first-observation milestones per `requestId` with the browser's monotonic `performance.now()` clock. The panel shows a dash when a milestone does not apply or has not happened yet. Completed measurements remain visible when a request is interrupted or fails.
+
+| Panel metric | Definition | 中文口径 |
+|---|---|---|
+| `STT first partial` | speech start -> first `transcript.partial` received | 开始说话到首个临时转写 |
+| `Final transcript` | speech end -> `transcript.final` received | 停止说话到最终转写 |
+| `LLM first token` | final transcript (or text request start) -> first `llm.delta` received | 最终转写到模型首字；文字请求则从发送开始 |
+| `TTS first audio` | first `llm.delta` -> the browser audio element's first `playing` event | 模型首字到浏览器真正开始播放 |
+| `Speech end -> audio` | speech end -> first browser `playing` event | 停止说话到听见首音的端到端等待 |
+
+The Gateway separately measures provider-side stages using its own injected monotonic clock. Browser and Gateway timestamps are never subtracted from each other, because their time origins are unrelated. Text turns therefore show dashes for STT metrics; push-to-talk commonly has no partial transcript; requests without TTS show dashes for audio metrics.
+
 ## Connection
 
 Default gateway URL:

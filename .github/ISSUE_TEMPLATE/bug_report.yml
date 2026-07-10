@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible problem in OpenGPT Live
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Remove API keys, private audio, transcripts, and personal data before submitting. Report security issues privately through the Security tab.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I reproduced this on the current default branch or explained why I could not.
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem summary
+      description: What happened, and why is it a problem?
+      placeholder: A live turn ends after a short pause even though the speaker continues.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Affected path
+      options:
+        - Text chat
+        - Push-to-talk
+        - Live Mode / VAD
+        - Streaming STT
+        - LLM streaming
+        - TTS playback
+        - Gateway / WebSocket
+        - Build / deployment
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest deterministic sequence you can.
+      placeholder: |
+        1. Start with ...
+        2. Enable ...
+        3. Say or send ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Redact credentials. Include versions and hardware relevant to the bug.
+      placeholder: |
+        - Commit:
+        - OS:
+        - Node / pnpm:
+        - Browser:
+        - Microphone / output device:
+        - LLM, STT, and TTS providers/models:
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, measurements, or recordings
+      description: Paste redacted logs or attach synthetic test media. Include latency or VAD values when relevant.
+      render: shell
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Local verification
+      description: Share the result of `pnpm test` or `pnpm check`, plus any manual browser test.
