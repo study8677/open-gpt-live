@@ -45,7 +45,7 @@ browser session
   -> realtime UI updates and speech playback
 ```
 
-The project currently ships a focused MVP: browser text input, push-to-talk recording, whole-turn STT transcription, in-memory session history, streamed LLM responses, and MP3 TTS playback.
+The project currently ships a focused MVP: browser text input, push-to-talk recording, experimental live voice mode with browser VAD and partial transcripts, in-memory session history, streamed LLM responses, and MP3 TTS playback.
 
 ## Why It Exists
 
@@ -54,7 +54,7 @@ Most voice AI demos are tightly coupled to one vendor API or hide the hard parts
 - **Protocol first**: browser and gateway communicate through typed WebSocket events.
 - **Provider flexible**: LLM, STT, and TTS live behind adapters, starting with OpenAI-compatible APIs.
 - **Session aware**: each gateway connection owns conversation history and active response state.
-- **Incremental by design**: text loop, push-to-talk, and TTS are implemented as separable protocol layers.
+- **Incremental by design**: text loop, push-to-talk, live VAD, and TTS are implemented as separable protocol layers.
 - **Honest scope**: the MVP does not pretend to be a full agent platform.
 
 ## Current Capabilities
@@ -63,22 +63,23 @@ Most voice AI demos are tightly coupled to one vendor API or hide the hard parts
 | --- | --- | --- |
 | Text chat over WebSocket | Working | Browser text input streams through the gateway to the LLM. |
 | Push-to-talk recording | Working | Uses `MediaRecorder` and sends `audio.chunk` events. |
+| Live voice mode | Experimental | Browser-side RMS VAD marks speech turns and reuses `audio.chunk`. |
 | Speech-to-text | Working | Whole-turn transcription through a Whisper-style API. |
+| Partial transcript | Experimental | Retranscribes the accumulated WebM/Opus prefix every 2s, then every 5s after 30s. |
 | LLM streaming | Working | OpenAI-compatible `/chat/completions` SSE parsing. |
 | Interrupt | Working for LLM and TTS | Sends `interrupt` and aborts the active response request. |
 | TTS / audio playback | Working | OpenAI-compatible `/audio/speech` response streamed to browser MP3 playback. |
-| Realtime STT / VAD | Not yet | Reserved in the protocol, intentionally out of MVP scope. |
 
 ## Architecture
 
 ```text
 apps/web
   Next.js App Router client
-  text input or push-to-talk audio -> WebSocket -> transcript/streaming display and audio playback
+  text input, push-to-talk, or live VAD audio -> WebSocket -> transcript/streaming display and audio playback
 
 apps/gateway
   Node.js ws server
-  audio aggregation -> STT -> session history -> OpenAI-compatible LLM -> streamed deltas -> TTS chunks
+  audio aggregation + partial STT -> session history -> OpenAI-compatible LLM -> streamed deltas -> TTS chunks
 
 packages/protocol
   shared WebSocket message types
@@ -89,9 +90,9 @@ packages/adapters
 
 ```mermaid
 flowchart LR
-  Web["apps/web<br/>Next.js client"] -->|user.text / audio.chunk| Gateway["apps/gateway<br/>Voice Session Gateway"]
-  Gateway -->|whole-turn audio| STT["STT Provider<br/>Whisper-compatible"]
-  STT -->|transcript.final| Gateway
+  Web["apps/web<br/>Next.js client"] -->|user.text / vad.* / audio.chunk| Gateway["apps/gateway<br/>Voice Session Gateway"]
+  Gateway -->|whole-turn or prefix audio| STT["STT Provider<br/>Whisper-compatible"]
+  STT -->|transcript.partial / transcript.final| Gateway
   Gateway -->|session history| LLM["LLM Provider<br/>OpenAI-compatible"]
   LLM -->|llm.delta stream| Gateway
   Gateway -->|assistant text segments| TTS["TTS Provider<br/>OpenAI-compatible"]
@@ -198,9 +199,12 @@ http://localhost:3000
 6. Send a second text message and confirm the answer can refer to the previous turn.
 7. Hold `Hold to Talk`, say a short phrase, then release.
 8. Confirm the transcript appears as a user message, then the assistant streams a reply.
-9. Deny microphone permission in the browser and confirm text input still works.
-10. While a response is streaming or playing, click `Stop`.
-11. Confirm streaming and playback stop immediately.
+9. Click `Live experimental`, speak without holding the button, then pause.
+10. Confirm a gray italic partial transcript appears first, then it is replaced by the final transcript.
+11. While TTS is playing in live mode, speak again and confirm playback stops immediately.
+12. Deny microphone permission in the browser and confirm text input still works.
+13. While a response is streaming or playing, click `Stop`.
+14. Confirm streaming and playback stop immediately.
 
 ## Protocol
 
@@ -211,6 +215,9 @@ The WebSocket protocol is documented in [docs/protocol.md](docs/protocol.md). Th
 | `session.start` | client -> gateway, gateway -> client | Start or confirm a browser session. |
 | `user.text` | client -> gateway | Submit text into the active conversation. |
 | `audio.chunk` | client -> gateway | Send MediaRecorder chunks for a push-to-talk turn. |
+| `vad.speech_start` | client -> gateway | Mark the start of an experimental live-mode speech turn. |
+| `vad.speech_end` | client -> gateway | Mark the end of an experimental live-mode speech turn. |
+| `transcript.partial` | gateway -> client | Return an interim transcript for an active live-mode turn. |
 | `transcript.final` | gateway -> client | Return final STT text for an audio turn. |
 | `llm.delta` | gateway -> client | Stream assistant text chunks. |
 | `llm.done` | gateway -> client | Mark completion, interruption, or error. |
@@ -218,9 +225,15 @@ The WebSocket protocol is documented in [docs/protocol.md](docs/protocol.md). Th
 | `tts.chunk` | gateway -> client | Stream generated speech as base64 MP3 chunks. |
 | `tts.end` | gateway -> client | Mark generated speech completion, interruption, or error. |
 | `playback.ack` | client -> gateway | Acknowledge played TTS chunks. |
-| `interrupt` | client -> gateway | Abort the active LLM stream. |
+| `interrupt` | client -> gateway | Abort the active LLM/TTS stream. |
 
-Reserved future events include `transcript.partial`.
+## Live Mode Notes
+
+`Live experimental` is off by default. It uses browser-side RMS VAD with these code-level defaults: speech threshold `0.02`, silence threshold `0.012`, 160 ms speech debounce, 750 ms hangover, 30 s max turn, 250 ms MediaRecorder chunks, 2.5x threshold while TTS is playing, and a 300 ms VAD suppression window after playback ends.
+
+Partial transcripts reuse the batch STT adapter by retranscribing the accumulated WebM/Opus prefix for the current turn. The gateway tries every 2 seconds, then every 5 seconds after a turn exceeds 30 seconds, and skips a tick if a previous partial STT call is still in flight.
+
+For a manual checklist, see [docs/live-mode-smoke-test.md](docs/live-mode-smoke-test.md).
 
 ## Development Commands
 

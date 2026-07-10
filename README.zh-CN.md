@@ -45,7 +45,7 @@ OpenGPT Live 是一个面向生产实践的实时语音 AI 助手 starter framew
   -> 前端实时更新和语音播放
 ```
 
-当前版本提供一个聚焦的 MVP：浏览器文本输入、按住说话、整段 STT 转写、内存会话历史、LLM 流式回复，以及 MP3 TTS 播放。
+当前版本提供一个聚焦的 MVP：浏览器文本输入、按住说话、带浏览器 VAD 和 partial transcript 的 experimental live mode、内存会话历史、LLM 流式回复，以及 MP3 TTS 播放。
 
 ## 为什么做这个项目？
 
@@ -54,7 +54,7 @@ OpenGPT Live 是一个面向生产实践的实时语音 AI 助手 starter framew
 - **协议优先**：浏览器和 Gateway 通过类型化 WebSocket 事件通信。
 - **模型可替换**：LLM、STT 和 TTS 都在 adapter 后面，先支持 OpenAI-compatible API。
 - **会话感知**：每个 Gateway 连接维护自己的对话历史和活跃响应状态。
-- **渐进式演进**：文本、按住说话和 TTS 都作为可分离的协议层实现。
+- **渐进式演进**：文本、按住说话、live VAD 和 TTS 都作为可分离的协议层实现。
 - **边界诚实**：当前 MVP 不伪装成完整 Agent 平台。
 
 ## 当前能力
@@ -63,22 +63,23 @@ OpenGPT Live 是一个面向生产实践的实时语音 AI 助手 starter framew
 | --- | --- | --- |
 | WebSocket 文本聊天 | 已完成 | 浏览器文本输入经 Gateway 流式调用 LLM。 |
 | 按住说话 | 已完成 | 使用 `MediaRecorder`，通过 `audio.chunk` 发送音频片段。 |
+| 连续语音模式 | Experimental | 浏览器端 RMS VAD 划分语音 turn，并复用 `audio.chunk`。 |
 | 语音转文字 | 已完成 | 通过 Whisper 风格 API 做整段转写。 |
+| Partial transcript | Experimental | 对累计 WebM/Opus 前缀每 2 秒重转写一次，30 秒后改为每 5 秒。 |
 | LLM 流式输出 | 已完成 | 解析 OpenAI-compatible `/chat/completions` SSE。 |
 | 中断 | LLM 和 TTS 已完成 | 发送 `interrupt`，Gateway abort 当前响应请求。 |
 | TTS / 语音播放 | 已完成 | OpenAI-compatible `/audio/speech` 响应流式发送到浏览器 MP3 播放队列。 |
-| 实时 STT / VAD | 未实现 | 协议已预留，当前 MVP 不做。 |
 
 ## 架构
 
 ```text
 apps/web
   Next.js App Router 客户端
-  文本输入或按住说话 -> WebSocket -> 转写文本/流式回复展示和语音播放
+  文本输入、按住说话或 live VAD 音频 -> WebSocket -> 转写文本/流式回复展示和语音播放
 
 apps/gateway
   Node.js ws 服务
-  音频聚合 -> STT -> 会话历史 -> OpenAI-compatible LLM -> 流式 delta -> TTS chunks
+  音频聚合 + partial STT -> 会话历史 -> OpenAI-compatible LLM -> 流式 delta -> TTS chunks
 
 packages/protocol
   共享 WebSocket 消息类型
@@ -89,9 +90,9 @@ packages/adapters
 
 ```mermaid
 flowchart LR
-  Web["apps/web<br/>Next.js client"] -->|user.text / audio.chunk| Gateway["apps/gateway<br/>Voice Session Gateway"]
-  Gateway -->|whole-turn audio| STT["STT Provider<br/>Whisper-compatible"]
-  STT -->|transcript.final| Gateway
+  Web["apps/web<br/>Next.js client"] -->|user.text / vad.* / audio.chunk| Gateway["apps/gateway<br/>Voice Session Gateway"]
+  Gateway -->|whole-turn or prefix audio| STT["STT Provider<br/>Whisper-compatible"]
+  STT -->|transcript.partial / transcript.final| Gateway
   Gateway -->|session history| LLM["LLM Provider<br/>OpenAI-compatible"]
   LLM -->|llm.delta stream| Gateway
   Gateway -->|assistant text segments| TTS["TTS Provider<br/>OpenAI-compatible"]
@@ -198,9 +199,12 @@ http://localhost:3000
 6. 再发送第二条文本，确认模型能引用上一轮上下文。
 7. 按住 `Hold to Talk`，说一句话后松开。
 8. 确认页面先显示转写文本，再流式显示助手回复。
-9. 在浏览器中拒绝麦克风权限，确认页面有明确提示且文字输入仍可用。
-10. 在回复流式输出或播放时点击 `Stop`。
-11. 确认流式输出和语音播放立即停止。
+9. 点击 `Live experimental`，不用按住按钮直接说话，然后停顿。
+10. 确认先出现灰色斜体 partial transcript，随后被最终转写替换。
+11. 在 live mode 下 TTS 播放时再次开口，确认播放立即停止。
+12. 在浏览器中拒绝麦克风权限，确认页面有明确提示且文字输入仍可用。
+13. 在回复流式输出或播放时点击 `Stop`。
+14. 确认流式输出和语音播放立即停止。
 
 ## 协议
 
@@ -211,6 +215,9 @@ WebSocket 协议见 [docs/protocol.md](docs/protocol.md)。当前最重要的事
 | `session.start` | client -> gateway, gateway -> client | 启动或确认浏览器会话。 |
 | `user.text` | client -> gateway | 将文本提交到当前会话。 |
 | `audio.chunk` | client -> gateway | 发送按住说话产生的 MediaRecorder 音频片段。 |
+| `vad.speech_start` | client -> gateway | 标记 experimental live mode 语音 turn 开始。 |
+| `vad.speech_end` | client -> gateway | 标记 experimental live mode 语音 turn 结束。 |
+| `transcript.partial` | gateway -> client | 返回 live mode 活跃 turn 的临时转写。 |
 | `transcript.final` | gateway -> client | 返回音频轮次的最终转写文本。 |
 | `llm.delta` | gateway -> client | 流式返回助手文本片段。 |
 | `llm.done` | gateway -> client | 标记完成、中断或错误。 |
@@ -218,9 +225,15 @@ WebSocket 协议见 [docs/protocol.md](docs/protocol.md)。当前最重要的事
 | `tts.chunk` | gateway -> client | 以 base64 MP3 chunk 流式返回生成语音。 |
 | `tts.end` | gateway -> client | 标记生成语音完成、中断或错误。 |
 | `playback.ack` | client -> gateway | 确认浏览器已播放 TTS chunk。 |
-| `interrupt` | client -> gateway | 中断当前 LLM 流式请求。 |
+| `interrupt` | client -> gateway | 中断当前 LLM/TTS 流式请求。 |
 
-预留事件包括 `transcript.partial`。
+## Live Mode 说明
+
+`Live experimental` 默认关闭。它使用浏览器端 RMS VAD，代码默认参数为：说话阈值 `0.02`、静音阈值 `0.012`、160 ms 起音确认、750 ms hangover、30 s 单 turn 上限、250 ms MediaRecorder chunk、TTS 播放期间阈值提高 2.5 倍、播放结束后 300 ms 抑制 VAD。
+
+Partial transcript 继续复用批式 STT adapter：Gateway 会对当前 turn 已累计的 WebM/Opus 前缀反复重转写。前 30 秒每 2 秒尝试一次，超过 30 秒后每 5 秒尝试一次；如果上一轮 partial STT 还在进行中，本次 tick 会跳过，不排队。
+
+手动测试清单见 [docs/live-mode-smoke-test.md](docs/live-mode-smoke-test.md)。
 
 ## 开发命令
 
