@@ -1,5 +1,7 @@
 export type LLMRole = "system" | "user" | "assistant";
 
+export * from "./streaming-stt";
+
 export interface LLMMessage {
   role: LLMRole;
   content: string;

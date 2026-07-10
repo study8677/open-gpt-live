@@ -2,7 +2,7 @@ import "./globals.css";
 
 export const metadata = {
   title: "OpenGPT Live",
-  description: "Text-loop MVP for OpenGPT Live"
+  description: "Open, interruptible realtime voice AI over WebSocket"
 };
 
 export default function RootLayout({
