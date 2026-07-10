@@ -2,6 +2,8 @@
 
 Use this checklist after `pnpm dev` with the gateway and web app connected.
 
+Before starting, confirm `curl http://127.0.0.1:8787/healthz` returns `status: ok`. Set `STT_REALTIME_ENABLED=true` to verify native streaming transcription; repeat once with it disabled to verify the batch WAV fallback.
+
 ## Push-To-Talk Regression
 
 1. Keep `Live experimental` off.
@@ -18,11 +20,20 @@ Use this checklist after `pnpm dev` with the gateway and web app connected.
 5. Confirm the partial transcript is replaced by a normal final user message.
 6. Confirm the assistant responds through the existing LLM/TTS path.
 
-## Partial Transcript Cost Guard
+## Pre-Roll
 
-1. Stay in live mode and speak continuously for more than 30 seconds.
-2. Confirm partial transcript updates continue but do not arrive faster than the configured cadence.
-3. Confirm the final transcript still arrives after you stop speaking.
+1. Start Live Mode in a quiet room.
+2. Say three short phrases that begin immediately and with a hard consonant.
+3. Confirm the first word is present in each final transcript.
+4. Confirm the first word is not duplicated.
+
+## Partial Transcript And Fallback Guard
+
+1. With Realtime STT enabled, speak for about 10 seconds and confirm provider transcript deltas appear while speaking.
+2. Confirm the final transcript still arrives after you stop and the successful turn does not call batch STT.
+3. Disable Realtime STT, set `NEXT_PUBLIC_VAD_MAX_TURN_MS=45000`, rebuild/restart the Web app, and speak for about 32 seconds.
+4. Confirm batch partial updates arrive no more often than the built-in 2 second cadence before 30 seconds and 5 second cadence afterward.
+5. Stop speaking and confirm the final PCM turn is accepted through the WAV fallback.
 
 ## Barge-In
 
@@ -44,3 +55,11 @@ Use this checklist after `pnpm dev` with the gateway and web app connected.
 1. Deny microphone permission and confirm text input still works.
 2. Test in a browser without AudioWorklet support if available.
 3. Confirm ScriptProcessor fallback still detects speech starts and ends.
+
+## Reconnect And Cleanup
+
+1. Start Live Mode, then stop the Gateway.
+2. Confirm the page shows a reconnecting state and releases the microphone.
+3. Restart the Gateway and confirm the page connects with a new session.
+4. Start Live Mode again and complete a new turn.
+5. Toggle Live Mode on and off three times and confirm the browser shows only one active microphone capture.

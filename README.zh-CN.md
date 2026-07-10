@@ -1,299 +1,176 @@
 <p align="center">
-  <a href="README.md">English</a>
-  ·
-  简体中文
+  <a href="README.md">English</a> · 简体中文
 </p>
 
 <p align="center">
-  <img src="assets/brand/logo.svg" alt="OpenGPT Live logo" width="160" />
+  <img src="assets/brand/logo.svg" alt="OpenGPT Live" width="132" />
 </p>
 
 <h1 align="center">OpenGPT Live</h1>
 
 <p align="center">
-  用开放 WebSocket 协议、可插拔模型适配器和会话网关，构建实时语音优先的 GPT 风格 AI 助手。
+  <strong>一个可以听、说、被打断的开放语音 AI 会话层。</strong>
 </p>
 
 <p align="center">
-  <a href="#快速开始">快速开始</a>
-  ·
-  <a href="docs/protocol.md">协议文档</a>
-  ·
-  <a href="#架构">架构</a>
-  ·
-  <a href="#路线图">路线图</a>
+  浏览器语音检测、实时转写、流式回答和语音播放，都通过可检查、可替换的 WebSocket 协议连接。
 </p>
 
 <p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="docs/protocol.md">协议</a> ·
+  <a href="docs/configuration.md">配置</a> ·
+  <a href="docs/deployment.md">部署</a> ·
+  <a href="TODO.md">路线图</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/study8677/open-gpt-live/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/study8677/open-gpt-live/actions/workflows/ci.yml/badge.svg" /></a>
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white" />
-  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-14-000000?style=flat-square&logo=nextdotjs&logoColor=white" />
-  <img alt="WebSocket" src="https://img.shields.io/badge/WebSocket-realtime-15B8E8?style=flat-square" />
-  <img alt="OpenAI compatible" src="https://img.shields.io/badge/OpenAI--compatible-LLM%20%2B%20STT%20%2B%20TTS-12B886?style=flat-square" />
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-22.13%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white" />
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-191919?style=flat-square" />
 </p>
 
-## OpenGPT Live 是什么？
+![OpenGPT Live 浏览器界面](output/playwright/live-voice.png)
 
-OpenGPT Live 是一个面向生产实践的实时语音 AI 助手 starter framework。它关注的是浏览器语音体验和 GPT 风格后端模型之间的会话层：实时、可中断、可替换模型供应商，并且协议边界清晰。
-
-核心链路很简单：
+## 开口说话，看见转写，听到回答，随时插话
 
 ```text
-浏览器会话
-  -> WebSocket Gateway
-  -> 语音转文字
-  -> GPT 风格 LLM 流式输出
-  -> 前端实时更新和语音播放
+打开麦克风
+  → 实时看到转写
+  → 回答边生成边出现
+  → 浏览器播放语音
+  → 再次开口，立即打断
 ```
 
-当前版本提供一个聚焦的 MVP：浏览器文本输入、按住说话、带浏览器 VAD 和 partial transcript 的 experimental live mode、内存会话历史、LLM 流式回复，以及 MP3 TTS 播放。
+OpenGPT Live 是浏览器语音体验与 GPT 风格模型基础设施之间的一份可运行参考实现。它没有用封闭 SDK 隐藏实时链路，而是把会话、语音轮次、中断和音频事件完整暴露出来。
 
-## 为什么做这个项目？
+## 当前真正可用的能力
 
-很多语音 AI demo 都和某个厂商 API 强绑定，或者把关键工程问题藏在不透明 SDK 后面。OpenGPT Live 的目标是把这些关键边界暴露出来，让开发者可以真正掌控实时语音 AI 应用的架构。
-
-- **协议优先**：浏览器和 Gateway 通过类型化 WebSocket 事件通信。
-- **模型可替换**：LLM、STT 和 TTS 都在 adapter 后面，先支持 OpenAI-compatible API。
-- **会话感知**：每个 Gateway 连接维护自己的对话历史和活跃响应状态。
-- **渐进式演进**：文本、按住说话、live VAD 和 TTS 都作为可分离的协议层实现。
-- **边界诚实**：当前 MVP 不伪装成完整 Agent 平台。
-
-## 当前能力
-
-| 模块 | 状态 | 说明 |
+| 能力 | 成熟度 | 当前实现 |
 | --- | --- | --- |
-| WebSocket 文本聊天 | 已完成 | 浏览器文本输入经 Gateway 流式调用 LLM。 |
-| 按住说话 | 已完成 | 使用 `MediaRecorder`，通过 `audio.chunk` 发送音频片段。 |
-| 连续语音模式 | Experimental | 浏览器端 RMS VAD 划分语音 turn，并复用 `audio.chunk`。 |
-| 语音转文字 | 已完成 | 通过 Whisper 风格 API 做整段转写。 |
-| Partial transcript | Experimental | 对累计 WebM/Opus 前缀每 2 秒重转写一次，30 秒后改为每 5 秒。 |
-| LLM 流式输出 | 已完成 | 解析 OpenAI-compatible `/chat/completions` SSE。 |
-| 中断 | LLM 和 TTS 已完成 | 发送 `interrupt`，Gateway abort 当前响应请求。 |
-| TTS / 语音播放 | 已完成 | OpenAI-compatible `/audio/speech` 响应流式发送到浏览器 MP3 播放队列。 |
+| 文字对话 | 稳定 | 类型化 WebSocket 消息和 Chat Completions 流式输出。 |
+| 按住说话 | 稳定 | MediaRecorder 分块、整段转写和 25 MB 上限。 |
+| 语音回答 | 稳定 | 按句生成 TTS，浏览器按顺序播放。 |
+| 停止与打断 | 稳定 | LLM、TTS、播放和迟到事件统一取消。 |
+| 连续语音模式 | 实验性 | 浏览器 RMS 语音检测、参数调节和断线清理。 |
+| 句首保护 | 实验性 | 语音开始确认前保留 400 ms PCM，减少第一个字被截断。 |
+| 流式语音转写 | 实验性 | OpenAI Realtime 增量转写，失败后自动回退到批式 WAV 转写。 |
+| 工程基线 | 稳定 | 运行时协议校验、自动化测试、CI 和生产构建。 |
 
-## 架构
+## 为什么值得做
 
-```text
-apps/web
-  Next.js App Router 客户端
-  文本输入、按住说话或 live VAD 音频 -> WebSocket -> 转写文本/流式回复展示和语音播放
-
-apps/gateway
-  Node.js ws 服务
-  音频聚合 + partial STT -> 会话历史 -> OpenAI-compatible LLM -> 流式 delta -> TTS chunks
-
-packages/protocol
-  共享 WebSocket 消息类型
-
-packages/adapters
-  LLM、STT、TTS provider 接口与默认实现
-```
-
-```mermaid
-flowchart LR
-  Web["apps/web<br/>Next.js client"] -->|user.text / vad.* / audio.chunk| Gateway["apps/gateway<br/>Voice Session Gateway"]
-  Gateway -->|whole-turn or prefix audio| STT["STT Provider<br/>Whisper-compatible"]
-  STT -->|transcript.partial / transcript.final| Gateway
-  Gateway -->|session history| LLM["LLM Provider<br/>OpenAI-compatible"]
-  LLM -->|llm.delta stream| Gateway
-  Gateway -->|assistant text segments| TTS["TTS Provider<br/>OpenAI-compatible"]
-  TTS -->|audio/mpeg chunks| Gateway
-  Gateway -->|transcript.final / llm.delta / llm.done / tts.chunk| Web
-```
-
-## 仓库结构
-
-```text
-apps/
-  web/             Next.js App Router demo client
-  gateway/         Node.js WebSocket gateway
-
-packages/
-  protocol/        共享 WebSocket 消息类型
-  adapters/        LLM、STT、TTS provider 接口
-
-docs/
-  protocol.md      WebSocket 协议和事件 schema
-
-assets/
-  brand/           Logo 和品牌资产
-```
-
-## 环境要求
-
-- Node.js 20+
-- pnpm 11+
-- OpenAI-compatible API key
+- **协议开放**：浏览器和 Gateway 的行为由共享 TypeScript 事件描述，不依赖黑盒传输层。
+- **模型可替换**：LLM、批式 STT、流式 STT 和 TTS 都在独立 Provider 接口之后。
+- **过程可观察**：临时转写、最终转写、文字增量、音频分块、完成、中断和错误都有明确事件。
+- **边界诚实**：这是语音会话层参考实现，不是托管助手、计费平台或万能 Agent 框架。
 
 ## 快速开始
 
-安装依赖：
+需要 Node.js 22.13+ 和 pnpm 11+。
 
 ```bash
 pnpm install
-```
-
-创建本地环境变量文件：
-
-```bash
 cp .env.example .env
 ```
 
-编辑 `.env`：
+在 `.env` 中至少配置 LLM Key：
 
-```bash
-OPENAI_API_KEY=sk-your-api-key
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o-mini
-STT_API_KEY=
-STT_BASE_URL=
-STT_MODEL=whisper-1
-TTS_API_KEY=
-TTS_BASE_URL=
-TTS_MODEL=tts-1
-TTS_VOICE=alloy
-TTS_FORMAT=mp3
-GATEWAY_PORT=8787
-NEXT_PUBLIC_GATEWAY_WS_URL=ws://localhost:8787
+```dotenv
+OPENAI_API_KEY=sk-your-key
 ```
 
-`STT_API_KEY` 和 `STT_BASE_URL` 是可选项。为空时，Gateway 会复用 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`。`STT_MODEL` 默认是 `whisper-1`。
-`TTS_API_KEY` 和 `TTS_BASE_URL` 是可选项。为空时，Gateway 会复用 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`。如果 `TTS_API_KEY` 和 `OPENAI_API_KEY` 都为空，Gateway 会优雅降级为纯文本模式。
-
-同时启动 Web 和 Gateway：
+启动 Web 和 Gateway：
 
 ```bash
 pnpm dev
 ```
 
-打开：
+打开 [http://localhost:3000](http://localhost:3000)。Gateway 健康检查位于 [http://localhost:8787/healthz](http://localhost:8787/healthz)。
+
+### 常用模式
+
+只要文字回答，不播放 TTS：
+
+```dotenv
+TTS_ENABLED=false
+```
+
+为连续语音模式启用真正的流式转写：
+
+```dotenv
+STT_REALTIME_ENABLED=true
+STT_REALTIME_MODEL=gpt-realtime-whisper
+STT_REALTIME_DELAY=low
+```
+
+流式 STT 默认关闭，因为普通的 OpenAI-compatible HTTP 服务不一定实现 OpenAI Realtime WebSocket 协议。独立密钥、模型地址、VAD 参数和完整环境变量见 [配置文档](docs/configuration.md)。
+
+## 工作原理
+
+```mermaid
+flowchart LR
+  Browser["浏览器\n文字 · 按住说话 · VAD · PCM 预录"]
+  Gateway["语音会话 Gateway\n协议校验 · 轮次 · 中断"]
+  BatchSTT["批式 STT\n按住说话 + 回退"]
+  RealtimeSTT["流式 STT\nPCM 增量转写"]
+  LLM["LLM\n流式文字"]
+  TTS["TTS\n顺序音频"]
+
+  Browser -->|类型化 WebSocket 事件| Gateway
+  Gateway --> RealtimeSTT
+  Gateway --> BatchSTT
+  Gateway --> LLM
+  LLM --> Gateway
+  Gateway --> TTS
+  Gateway -->|临时/最终文字 + 音频| Browser
+```
 
 ```text
-http://localhost:3000
+apps/web             浏览器采集、VAD、预录、播放和重连
+apps/gateway         会话状态、协议校验、STT/LLM/TTS 编排
+packages/protocol    前后端共享消息契约
+packages/adapters    批式与流式模型 Provider 接口
 ```
 
-## 环境变量
+默认流式 STT Adapter 遵循 OpenAI 官方 [Realtime transcription 协议](https://developers.openai.com/api/docs/guides/realtime-transcription)：24 kHz 单声道 PCM16、`input_audio_buffer.append`、手动提交、增量转写和完成事件。Provider item ID 会保留在 Adapter 内用于诊断；Gateway 将每个转写 Session 映射到一个 request ID。
 
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | 是 | 默认 LLM 和 fallback STT provider 使用的 API key。 |
-| `OPENAI_BASE_URL` | 否 | 默认 `https://api.openai.com/v1`。 |
-| `OPENAI_MODEL` | 否 | 默认 `gpt-4o-mini`。 |
-| `STT_API_KEY` | 否 | STT 单独 API key，默认回退到 `OPENAI_API_KEY`。 |
-| `STT_BASE_URL` | 否 | STT 单独 base URL，默认回退到 `OPENAI_BASE_URL`。 |
-| `STT_MODEL` | 否 | 默认 `whisper-1`。 |
-| `TTS_API_KEY` | 否 | TTS 单独 API key，默认回退到 `OPENAI_API_KEY`；如果没有可用 key，则禁用 TTS。 |
-| `TTS_BASE_URL` | 否 | TTS 单独 base URL，默认回退到 `OPENAI_BASE_URL`。 |
-| `TTS_MODEL` | 否 | 默认 `tts-1`。 |
-| `TTS_VOICE` | 否 | 默认 `alloy`。 |
-| `TTS_FORMAT` | 否 | 默认 `mp3`；浏览器播放按 `audio/mpeg` 处理。 |
-| `GATEWAY_PORT` | 否 | 默认 `8787`。 |
-| `NEXT_PUBLIC_GATEWAY_WS_URL` | 否 | 默认 `ws://localhost:8787`。 |
-
-## 验收流程
-
-1. 打开 `http://localhost:3000`。
-2. 确认页面显示 `Connected`。
-3. 输入文字并点击 `Send`。
-4. 确认助手回复会逐字流式出现。
-5. 如果已配置 TTS，确认回复也会播放语音；如果浏览器阻止自动播放，点击 `播放语音回复`。
-6. 再发送第二条文本，确认模型能引用上一轮上下文。
-7. 按住 `Hold to Talk`，说一句话后松开。
-8. 确认页面先显示转写文本，再流式显示助手回复。
-9. 点击 `Live experimental`，不用按住按钮直接说话，然后停顿。
-10. 确认先出现灰色斜体 partial transcript，随后被最终转写替换。
-11. 在 live mode 下 TTS 播放时再次开口，确认播放立即停止。
-12. 在浏览器中拒绝麦克风权限，确认页面有明确提示且文字输入仍可用。
-13. 在回复流式输出或播放时点击 `Stop`。
-14. 确认流式输出和语音播放立即停止。
-
-## 协议
-
-WebSocket 协议见 [docs/protocol.md](docs/protocol.md)。当前最重要的事件包括：
-
-| 事件 | 方向 | 用途 |
-| --- | --- | --- |
-| `session.start` | client -> gateway, gateway -> client | 启动或确认浏览器会话。 |
-| `user.text` | client -> gateway | 将文本提交到当前会话。 |
-| `audio.chunk` | client -> gateway | 发送按住说话产生的 MediaRecorder 音频片段。 |
-| `vad.speech_start` | client -> gateway | 标记 experimental live mode 语音 turn 开始。 |
-| `vad.speech_end` | client -> gateway | 标记 experimental live mode 语音 turn 结束。 |
-| `transcript.partial` | gateway -> client | 返回 live mode 活跃 turn 的临时转写。 |
-| `transcript.final` | gateway -> client | 返回音频轮次的最终转写文本。 |
-| `llm.delta` | gateway -> client | 流式返回助手文本片段。 |
-| `llm.done` | gateway -> client | 标记完成、中断或错误。 |
-| `tts.start` | gateway -> client | 开始生成语音流。 |
-| `tts.chunk` | gateway -> client | 以 base64 MP3 chunk 流式返回生成语音。 |
-| `tts.end` | gateway -> client | 标记生成语音完成、中断或错误。 |
-| `playback.ack` | client -> gateway | 确认浏览器已播放 TTS chunk。 |
-| `interrupt` | client -> gateway | 中断当前 LLM/TTS 流式请求。 |
-
-## Live Mode 说明
-
-`Live experimental` 默认关闭。它使用浏览器端 RMS VAD，代码默认参数为：说话阈值 `0.02`、静音阈值 `0.012`、160 ms 起音确认、750 ms hangover、30 s 单 turn 上限、250 ms MediaRecorder chunk、TTS 播放期间阈值提高 2.5 倍、播放结束后 300 ms 抑制 VAD。
-
-Partial transcript 继续复用批式 STT adapter：Gateway 会对当前 turn 已累计的 WebM/Opus 前缀反复重转写。前 30 秒每 2 秒尝试一次，超过 30 秒后每 5 秒尝试一次；如果上一轮 partial STT 还在进行中，本次 tick 会跳过，不排队。
-
-手动测试清单见 [docs/live-mode-smoke-test.md](docs/live-mode-smoke-test.md)。
-
-## 开发命令
-
-同时启动两个应用：
+## 质量与生产命令
 
 ```bash
-pnpm dev
+pnpm typecheck   # 检查全部 workspace
+pnpm test        # 协议、Gateway、Adapter 和浏览器状态测试
+pnpm build       # 打包 Gateway，构建 Next.js 生产版本
+pnpm check       # 执行以上全部检查
+pnpm start       # 以 NODE_ENV=production 启动已经构建好的进程
 ```
 
-检查所有 workspace 类型：
+GitHub Actions 会在每次推送和 Pull Request 中执行类型检查、测试和生产构建。Docker、WSS 和反向代理配置见 [部署文档](docs/deployment.md)。
 
-```bash
-pnpm typecheck
-```
+## 当前限制
 
-## 工程原则
+- 对话历史只存在于当前 WebSocket 连接内。
+- 重复使用旧 `sessionId` 不会恢复过去的消息。
+- 只靠 RMS 的语音检测在噪声环境或外放音量较高时仍可能误触发。
+- 流式 STT Adapter 当前是 OpenAI Realtime 专用实现；批式 STT 继续兼容 OpenAI 风格接口。
+- 当前不包含鉴权、计费、多租户隔离、工具调用和长期记忆。
+- Chromium 是已经验证的浏览器基线；对外宣称其他浏览器支持前，请先查看 [浏览器支持说明](docs/browser-support.md)。
 
-- 保持浏览器、协议、Gateway 和 provider adapter 的职责分离。
-- 优先使用类型化消息契约，避免隐式前后端耦合。
-- 保持模型供应商可替换。
-- 用显式事件让部分进度可观察。
-- 在优化低延迟之前，先保证 MVP 行为稳定、可调试。
-- 在实时链路稳定前，不急于加入鉴权、计费、持久化或 Docker。
+这些限制是有意保留的。更上层的 Agent 能力应该建立在可测量、可信的语音闭环之上。
 
-## 适用场景
+## 文档
 
-- 面向内部工具的语音优先 copilots。
-- 需要转写和实时回复的客服助手。
-- AI 辅导和语言学习原型。
-- 实时 LLM Gateway 架构研究 demo。
-- 展示 WebSocket、流式输出、模型抽象和音频链路能力的作品集项目。
+- [WebSocket 协议](docs/protocol.md)
+- [配置参考](docs/configuration.md)
+- [Live Mode 冒烟测试](docs/live-mode-smoke-test.md)
+- [浏览器支持](docs/browser-support.md)
+- [生产部署](docs/deployment.md)
+- [按优先级排列的 TODO](TODO.md)
 
-## 路线图
+## 参与贡献
 
-长期目标是构建一个语音优先的 AI 助手框架：
-
-```text
-realtime voice layer
-  -> gateway session orchestration
-  -> OpenAI-compatible or local LLM providers
-  -> tools, memory, search, and agent workflows
-```
-
-当前里程碑刻意保持范围收敛：先把协议、整段转写、流式输出、TTS 播放、上下文处理和中断语义打稳，再进入更实时的音频能力。
-
-近期路线图：
-
-- [x] WebSocket 文本回路。
-- [x] 按住说话和整段 STT。
-- [x] TTS provider 和浏览器播放。
-- [x] 更清晰的响应中断状态机。
-- [ ] 工具注册表和简单 function calls。
-- [ ] 持久化记忆 adapter。
-- [ ] 实时 STT 和 partial transcript 事件。
-- [ ] 生产部署指南。
-
-## 这个项目不是什么？
-
-OpenGPT Live 不是托管语音助手服务，不是计费平台，也不是封闭 SDK wrapper。它是浏览器语音 UX 和 GPT 风格模型基础设施之间的实时会话层开源参考实现。
+提交 PR 前请运行 `pnpm check`。修改协议或语音轮次生命周期时，应同时增加回归测试，并保证文档描述与真实事件顺序一致。
 
 ## License
 
-MIT
+[MIT](LICENSE)

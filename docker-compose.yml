@@ -1,0 +1,39 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8787
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+    ports:
+      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_GATEWAY_WS_URL: ${NEXT_PUBLIC_GATEWAY_WS_URL:-ws://localhost:8787}
+        NEXT_PUBLIC_VAD_SPEECH_THRESHOLD: ${NEXT_PUBLIC_VAD_SPEECH_THRESHOLD:-0.02}
+        NEXT_PUBLIC_VAD_SILENCE_THRESHOLD: ${NEXT_PUBLIC_VAD_SILENCE_THRESHOLD:-0.012}
+        NEXT_PUBLIC_VAD_START_DEBOUNCE_MS: ${NEXT_PUBLIC_VAD_START_DEBOUNCE_MS:-160}
+        NEXT_PUBLIC_VAD_HANGOVER_MS: ${NEXT_PUBLIC_VAD_HANGOVER_MS:-750}
+        NEXT_PUBLIC_VAD_MAX_TURN_MS: ${NEXT_PUBLIC_VAD_MAX_TURN_MS:-30000}
+        NEXT_PUBLIC_VAD_PRE_ROLL_MS: ${NEXT_PUBLIC_VAD_PRE_ROLL_MS:-400}
+        NEXT_PUBLIC_VAD_PLAYBACK_THRESHOLD_MULTIPLIER: ${NEXT_PUBLIC_VAD_PLAYBACK_THRESHOLD_MULTIPLIER:-2.5}
+        NEXT_PUBLIC_VAD_PLAYBACK_SUPPRESS_AFTER_END_MS: ${NEXT_PUBLIC_VAD_PLAYBACK_SUPPRESS_AFTER_END_MS:-300}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "3000:3000"

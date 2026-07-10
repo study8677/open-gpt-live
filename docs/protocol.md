@@ -12,7 +12,7 @@ LLM text -> gateway TTS -> WebSocket -> browser audio playback
 ```
 
 The push-to-talk path records a whole turn, aggregates MediaRecorder chunks in the gateway, transcribes the complete audio file once, and then submits the transcript into the same user text flow.
-The experimental live mode uses browser-side VAD to mark speech boundaries while reusing the same `audio.chunk` channel. During a live turn, the gateway periodically retranscribes the accumulated WebM/Opus prefix and sends `transcript.partial`; after VAD marks the turn complete, it sends `transcript.final`.
+Live Mode uses browser-side VAD to mark speech boundaries while reusing the same `audio.chunk` channel. The AudioWorklet continuously produces 24 kHz mono PCM16 frames and the browser keeps a short pre-roll before VAD confirmation. When Realtime STT is enabled, the Gateway forwards those frames incrementally and maps provider deltas to `transcript.partial`. If Realtime STT is disabled or fails, the Gateway can periodically transcribe the accumulated audio and always uses batch STT as the final fallback.
 The TTS output path segments the assistant text and streams MP3 chunks back to the browser for queued playback.
 
 ## Connection
@@ -47,7 +47,7 @@ Request-scoped messages should include a `requestId`. The browser generates this
 
 Direction: client -> gateway
 
-Starts or resumes a session. The client may provide a `sessionId`, but the gateway can also create one.
+Starts or identifies a connection-local session. The client may provide a `sessionId`, but the Gateway can also create one. The current in-memory implementation does not restore history from a previous connection merely because the same ID is supplied.
 
 ```json
 {
@@ -131,7 +131,21 @@ Gateway behavior:
 - Streams the assistant response through `llm.delta`.
 - Streams generated speech through `tts.start`, `tts.chunk`, and `tts.end` when TTS is configured.
 
-In live mode, `audio.chunk` uses `turnMode: "live"` and is scoped by `vad.speech_start` / `vad.speech_end`. The gateway may run partial STT while chunks are arriving, but only `transcript.final` is submitted to the LLM.
+In Live Mode, `audio.chunk` uses `turnMode: "live"`, `mimeType: "audio/pcm;rate=24000"`, and is scoped by `vad.speech_start` / `vad.speech_end`:
+
+```json
+{
+  "type": "audio.chunk",
+  "requestId": "request-uuid",
+  "chunk": "base64-encoded-pcm16-frame",
+  "mimeType": "audio/pcm;rate=24000",
+  "sequence": 0,
+  "turnMode": "live",
+  "isFinal": false
+}
+```
+
+The Gateway forwards these frames to Streaming STT when configured. Only `transcript.final` is submitted to the LLM. For batch fallback, PCM16 frames are wrapped in a valid mono WAV container before they are sent to the batch STT adapter.
 
 ### `vad.speech_start`
 

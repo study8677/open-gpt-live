@@ -1,0 +1,29 @@
+FROM node:22-alpine AS build
+
+RUN corepack enable
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/gateway/package.json apps/gateway/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/adapters/package.json packages/adapters/package.json
+COPY packages/protocol/package.json packages/protocol/package.json
+RUN pnpm install --frozen-lockfile
+
+COPY apps/gateway apps/gateway
+COPY packages/adapters packages/adapters
+COPY packages/protocol packages/protocol
+RUN pnpm --filter @open-gpt-live/gateway build
+
+FROM node:22-alpine AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    GATEWAY_HOST=0.0.0.0 \
+    GATEWAY_PORT=8787
+
+COPY --from=build /app/apps/gateway/dist ./dist
+
+USER node
+EXPOSE 8787
+CMD ["node", "dist/server.cjs"]
