@@ -17,9 +17,279 @@ import { test } from "vitest";
 import { WebSocket } from "ws";
 import {
   createGatewayServer,
+  type GatewayLogger,
   type GatewayProviders,
   type GatewayServerOptions
 } from "./gateway.js";
+
+test("gateway logs request-scoped STT, LLM, and TTS latency from one injected clock", async () => {
+  let now = 20;
+  const entries: Array<{
+    event: string;
+    fields: Record<string, unknown>;
+  }> = [];
+  const write = (event: string, fields: Record<string, unknown> = {}): void => {
+    entries.push({ event, fields });
+  };
+  const logger: GatewayLogger = {
+    info: write,
+    warn: write,
+    error: write
+  };
+  const stt: STTProvider = {
+    async transcribe() {
+      now = 60;
+      return { text: "measured speech" };
+    }
+  };
+  const llm: LLMProvider = {
+    async *streamText() {
+      now = 100;
+      yield { delta: "measured answer" };
+    }
+  };
+  const tts: TTSProvider = {
+    async *synthesize() {
+      now = 140;
+      yield audioOutput([1, 2, 3]);
+    }
+  };
+
+  await withGateway(
+    defaultProviders({ stt, llm, tts }),
+    { now: () => now, logger },
+    async (client) => {
+      client.send(audioChunk("latency-voice", [1, 2], 0, true, "ptt"));
+      await client.waitFor(
+        (message) =>
+          message.type === WS_EVENTS.TTS_END &&
+          message.requestId === "latency-voice"
+      );
+    }
+  );
+
+  expectLog(entries, "latency.stt", "latency-voice", {
+    requestKind: "ptt",
+    sttPath: "batch",
+    outcome: "completed",
+    sttFinalMs: 40,
+    sttTotalMs: 40
+  });
+  expectLog(entries, "latency.llm_first_delta", "latency-voice", {
+    llmFirstDeltaMs: 40,
+    inputReadyToFirstLlmMs: 40
+  });
+  expectLog(entries, "latency.tts_first_chunk", "latency-voice", {
+    ttsFirstChunkMs: 40,
+    llmFirstToTtsFirstChunkMs: 40,
+    speechEndToFirstTtsChunkMs: 120
+  });
+  expectLog(entries, "request.finished", "latency-voice", {
+    stage: "done",
+    requestTotalMs: 120
+  });
+});
+
+test("gateway latency logs use text request start when STT does not apply", async () => {
+  let now = 10;
+  const entries: Array<{ event: string; fields: Record<string, unknown> }> = [];
+  const logger = captureLogger(entries);
+  const llm: LLMProvider = {
+    async *streamText() {
+      now = 30;
+      yield { delta: "text answer" };
+    }
+  };
+  const tts: TTSProvider = {
+    async *synthesize() {
+      now = 50;
+      yield audioOutput([1]);
+    }
+  };
+
+  await withGateway(
+    defaultProviders({ llm, tts }),
+    { now: () => now, logger },
+    async (client) => {
+      client.send({
+        type: WS_EVENTS.USER_TEXT,
+        requestId: "latency-text",
+        text: "measure text"
+      });
+      await client.waitFor(
+        (message) =>
+          message.type === WS_EVENTS.TTS_END &&
+          message.requestId === "latency-text"
+      );
+    }
+  );
+
+  assert.equal(
+    entries.some(
+      (entry) =>
+        entry.event === "latency.stt" &&
+        entry.fields.requestId === "latency-text"
+    ),
+    false
+  );
+  expectLog(entries, "latency.llm_first_delta", "latency-text", {
+    requestKind: "text",
+    llmFirstDeltaMs: 20,
+    inputReadyToFirstLlmMs: 20
+  });
+  expectLog(entries, "latency.tts_first_chunk", "latency-text", {
+    requestKind: "text",
+    ttsFirstChunkMs: 20,
+    llmFirstToTtsFirstChunkMs: 20
+  });
+  expectLog(entries, "request.finished", "latency-text", {
+    requestKind: "text",
+    stage: "done",
+    requestTotalMs: 40
+  });
+});
+
+test("gateway latency logs cover live streaming partial and final transcription", async () => {
+  let now = 0;
+  const entries: Array<{ event: string; fields: Record<string, unknown> }> = [];
+  const session = new MockStreamingSTTSession("live partial", "live final", () => {
+    now = 160;
+  });
+  const llm: LLMProvider = {
+    async *streamText() {
+      now = 200;
+      yield { delta: "live answer" };
+    }
+  };
+
+  await withGateway(
+    defaultProviders({
+      llm,
+      streamingStt: {
+        async createSession() {
+          return session;
+        }
+      }
+    }),
+    { now: () => now, logger: captureLogger(entries) },
+    async (client) => {
+      client.send({
+        type: WS_EVENTS.VAD_SPEECH_START,
+        requestId: "latency-live",
+        turnMode: "live",
+        startedAt: 0
+      });
+      client.send(
+        audioChunk(
+          "latency-live",
+          [1, 0],
+          0,
+          false,
+          "live",
+          "audio/pcm;rate=24000"
+        )
+      );
+      await waitUntil(() => session.appended.length === 1);
+      now = 100;
+      client.send({
+        type: WS_EVENTS.VAD_SPEECH_END,
+        requestId: "latency-live",
+        endedAt: 100,
+        reason: "silence"
+      });
+      await client.waitFor(isDone("latency-live", "stop"));
+    }
+  );
+
+  expectLog(entries, "latency.stt", "latency-live", {
+    requestKind: "live",
+    sttPath: "realtime",
+    outcome: "completed",
+    sttFirstPartialMs: 160,
+    sttFinalMs: 60,
+    sttTotalMs: 160
+  });
+  expectLog(entries, "latency.llm_first_delta", "latency-live", {
+    requestKind: "live",
+    llmFirstDeltaMs: 40,
+    inputReadyToFirstLlmMs: 40
+  });
+});
+
+test("interrupted and errored latency logs retain completed milestones", async () => {
+  let now = 0;
+  let llmCalls = 0;
+  const entries: Array<{ event: string; fields: Record<string, unknown> }> = [];
+  const llm: LLMProvider = {
+    async *streamText(_messages, options) {
+      llmCalls += 1;
+      if (llmCalls === 1) {
+        now = 20;
+        yield { delta: "started" };
+        await waitForAbort(options?.signal);
+        return;
+      }
+      now = 100;
+      yield { delta: "before tts error" };
+    }
+  };
+  const tts: TTSProvider = {
+    async *synthesize() {
+      now = 130;
+      throw new Error("measured tts error");
+    }
+  };
+
+  await withGateway(
+    defaultProviders({ llm, tts }),
+    { now: () => now, logger: captureLogger(entries) },
+    async (client) => {
+      client.send({
+        type: WS_EVENTS.USER_TEXT,
+        requestId: "latency-interrupted",
+        text: "interrupt this"
+      });
+      await client.waitFor(
+        (message) =>
+          message.type === WS_EVENTS.LLM_DELTA &&
+          message.requestId === "latency-interrupted"
+      );
+      now = 40;
+      client.send({
+        type: WS_EVENTS.INTERRUPT,
+        requestId: "latency-interrupted",
+        reason: "test interrupt"
+      });
+      await client.waitFor(isDone("latency-interrupted", "interrupted"));
+
+      now = 80;
+      client.send({
+        type: WS_EVENTS.USER_TEXT,
+        requestId: "latency-error",
+        text: "trigger tts error"
+      });
+      await client.waitFor(
+        (message) =>
+          message.type === WS_EVENTS.TTS_END &&
+          message.requestId === "latency-error" &&
+          message.reason === "error"
+      );
+    }
+  );
+
+  expectLog(entries, "request.finished", "latency-interrupted", {
+    stage: "interrupted",
+    requestTotalMs: 40,
+    llmFirstDeltaMs: 20,
+    inputReadyToFirstLlmMs: 20
+  });
+  expectLog(entries, "request.finished", "latency-error", {
+    stage: "error",
+    requestTotalMs: 50,
+    llmFirstDeltaMs: 20,
+    inputReadyToFirstLlmMs: 20
+  });
+});
 
 test("gateway exposes a no-store health endpoint", async () => {
   const server = await createGatewayServer({
@@ -337,6 +607,10 @@ test("live PCM is appended to streaming STT and uses its partial and final trans
 
 test("failed streaming STT falls back to a valid PCM WAV batch transcription", async () => {
   const inputs: Array<{ data: Uint8Array; mimeType: string; filename?: string }> = [];
+  const latencyEntries: Array<{
+    event: string;
+    fields: Record<string, unknown>;
+  }> = [];
   const providers = defaultProviders({
     stt: {
       async transcribe(input) {
@@ -351,7 +625,10 @@ test("failed streaming STT falls back to a valid PCM WAV batch transcription", a
     }
   });
 
-  await withGateway(providers, {}, async (client) => {
+  await withGateway(
+    providers,
+    { logger: captureLogger(latencyEntries) },
+    async (client) => {
     client.send({
       type: WS_EVENTS.VAD_SPEECH_START,
       requestId: "streaming-fallback",
@@ -385,6 +662,12 @@ test("failed streaming STT falls back to a valid PCM WAV batch transcription", a
       "RIFF"
     );
     assert.equal(finalInput?.data.byteLength, 48);
+    }
+  );
+  expectLog(latencyEntries, "latency.stt", "streaming-fallback", {
+    requestKind: "live",
+    sttPath: "batch_fallback",
+    outcome: "completed"
   });
 });
 
@@ -993,7 +1276,8 @@ class MockStreamingSTTSession implements StreamingSTTSession {
 
   constructor(
     private readonly partial: string,
-    private readonly final: string
+    private readonly final: string,
+    private readonly onCommit?: () => void
   ) {}
 
   appendAudio(audio: Uint8Array): void {
@@ -1002,6 +1286,7 @@ class MockStreamingSTTSession implements StreamingSTTSession {
 
   commit(): void {
     this.commits += 1;
+    this.onCommit?.();
     if (this.partial) {
       this.push({
         type: "delta",
@@ -1117,6 +1402,32 @@ function typesFor(messages: ServerMessage[], requestId: string): string[] {
   return messages
     .filter((message) => "requestId" in message && message.requestId === requestId)
     .map((message) => message.type);
+}
+
+function expectLog(
+  entries: Array<{ event: string; fields: Record<string, unknown> }>,
+  event: string,
+  requestId: string,
+  expected: Record<string, unknown>
+): void {
+  const entry = entries.find(
+    (candidate) =>
+      candidate.event === event && candidate.fields.requestId === requestId
+  );
+  assert.ok(entry, `missing ${event} log for ${requestId}`);
+  assert.deepEqual(
+    Object.fromEntries(Object.keys(expected).map((key) => [key, entry.fields[key]])),
+    expected
+  );
+}
+
+function captureLogger(
+  entries: Array<{ event: string; fields: Record<string, unknown> }>
+): GatewayLogger {
+  const write = (event: string, fields: Record<string, unknown> = {}): void => {
+    entries.push({ event, fields });
+  };
+  return { info: write, warn: write, error: write };
 }
 
 function waitForAbort(signal: AbortSignal | undefined): Promise<void> {

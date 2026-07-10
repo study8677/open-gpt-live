@@ -97,6 +97,21 @@ interface ActiveRun {
   ttsEnded: boolean;
   ttsSequence: number;
   ttsSegmentIndex: number;
+  timing: RequestTiming;
+}
+
+interface RequestTiming {
+  kind: "text" | "ptt" | "live";
+  sttPath?: "batch" | "realtime" | "batch_fallback";
+  requestStartedAt: number;
+  speechStartedAt?: number;
+  speechEndedAt?: number;
+  firstPartialAt?: number;
+  finalTranscriptAt?: number;
+  llmStartedAt?: number;
+  firstLlmDeltaAt?: number;
+  ttsStartedAt?: number;
+  firstTtsChunkAt?: number;
 }
 
 interface SessionState {
@@ -120,6 +135,8 @@ interface ActiveAudioTurn {
   partialInFlight: boolean;
   controllers: Set<AbortController>;
   streaming?: ActiveStreamingTranscription;
+  timing: RequestTiming;
+  latencyLogged: boolean;
 }
 
 interface ActiveStreamingTranscription {
@@ -152,7 +169,7 @@ export async function createGatewayServer(
     ttsVoice: options.ttsVoice,
     systemPrompt: options.systemPrompt ?? defaultSystemPrompt,
     createId: options.createId ?? randomUUID,
-    now: options.now ?? Date.now,
+    now: options.now ?? (() => performance.now()),
     logger: options.logger ?? noopLogger
   };
 
@@ -366,13 +383,20 @@ class GatewayConnection {
     void this.handleAudioChunk(message);
   }
 
-  private async handleUserText(requestId: string, text: string): Promise<void> {
+  private async handleUserText(
+    requestId: string,
+    text: string,
+    timing: RequestTiming = {
+      kind: "text",
+      requestStartedAt: this.config.now()
+    }
+  ): Promise<void> {
     if (this.session.current) {
       this.interruptCurrentRun("new user message");
     }
 
     this.session.history.push({ role: "user", content: text });
-    await this.streamAssistantResponse(requestId);
+    await this.streamAssistantResponse(requestId, timing);
   }
 
   private async handleAudioChunk(message: AudioChunkMessage): Promise<void> {
@@ -389,6 +413,7 @@ class GatewayConnection {
           requestId: message.requestId,
           reason: "size_limit"
         });
+        turn.state = "error";
         this.deleteAudioTurn(turn, "audio limit exceeded");
         this.send({
           type: "error",
@@ -413,6 +438,8 @@ class GatewayConnection {
       this.maybeSchedulePartialTranscription(turn);
       return;
     }
+
+    turn.timing.speechEndedAt ??= this.config.now();
 
     if (turn.turnMode === "live") {
       return;
@@ -439,7 +466,14 @@ class GatewayConnection {
       partialSequence: 0,
       lastPartialAt: startedAt,
       partialInFlight: false,
-      controllers: new Set()
+      controllers: new Set(),
+      timing: {
+        kind: "live",
+        sttPath: this.providers.streamingStt ? "realtime" : "batch",
+        requestStartedAt: startedAt,
+        speechStartedAt: startedAt
+      },
+      latencyLogged: false
     };
     this.session.audioTurns.set(requestId, turn);
     this.beginStreamingTranscription(turn);
@@ -450,6 +484,7 @@ class GatewayConnection {
     if (!turn || turn.turnMode !== "live" || turn.state !== "recording") {
       return;
     }
+    turn.timing.speechEndedAt ??= this.config.now();
     if (turn.streaming) {
       try {
         const transcript = await this.finishStreamingTranscription(turn);
@@ -459,13 +494,14 @@ class GatewayConnection {
           this.session.audioTurns.get(turn.requestId) === turn
         ) {
           turn.state = "done";
+          turn.timing.finalTranscriptAt = this.config.now();
           this.deleteAudioTurn(turn, "streaming transcription completed");
           this.send({
             type: WS_EVENTS.TRANSCRIPT_FINAL,
             requestId: turn.requestId,
             text: transcript
           });
-          await this.handleUserText(turn.requestId, transcript);
+          await this.handleUserText(turn.requestId, transcript, turn.timing);
           return;
         }
         if (
@@ -475,6 +511,7 @@ class GatewayConnection {
         ) {
           turn.streaming.session?.close(1000, "empty realtime transcript");
           turn.streaming = undefined;
+          turn.timing.sttPath = "batch_fallback";
           turn.state = "recording";
         }
       } catch (error) {
@@ -493,6 +530,7 @@ class GatewayConnection {
         });
         turn.streaming?.session?.close(1011, "using batch STT fallback");
         turn.streaming = undefined;
+        turn.timing.sttPath = "batch_fallback";
         turn.state = "recording";
       }
     }
@@ -576,6 +614,7 @@ class GatewayConnection {
         }
         if (event.type === "delta") {
           streaming.transcript += event.delta;
+          turn.timing.firstPartialAt ??= this.config.now();
           this.send({
             type: WS_EVENTS.TRANSCRIPT_PARTIAL,
             requestId: turn.requestId,
@@ -740,13 +779,15 @@ class GatewayConnection {
       }
 
       turn.state = "done";
+      turn.timing.finalTranscriptAt = this.config.now();
       this.session.audioTurns.delete(turn.requestId);
+      this.logAudioLatency(turn, "completed");
       this.send({
         type: WS_EVENTS.TRANSCRIPT_FINAL,
         requestId: turn.requestId,
         text: transcript
       });
-      await this.handleUserText(turn.requestId, transcript);
+      await this.handleUserText(turn.requestId, transcript, turn.timing);
     } catch (error) {
       if (controller.signal.aborted || this.disposed) {
         return;
@@ -796,7 +837,17 @@ class GatewayConnection {
       partialSequence: 0,
       lastPartialAt: now,
       partialInFlight: false,
-      controllers: new Set()
+      controllers: new Set(),
+      timing: {
+        kind: message.turnMode ?? "ptt",
+        sttPath:
+          message.turnMode === "live" && this.providers.streamingStt
+            ? "realtime"
+            : "batch",
+        requestStartedAt: now,
+        speechStartedAt: now
+      },
+      latencyLogged: false
     };
     this.session.audioTurns.set(message.requestId, turn);
     return turn;
@@ -839,6 +890,7 @@ class GatewayConnection {
           this.session.audioTurns.get(turn.requestId) === turn &&
           turn.state === "recording"
         ) {
+          turn.timing.firstPartialAt ??= this.config.now();
           this.send({
             type: WS_EVENTS.TRANSCRIPT_PARTIAL,
             requestId: turn.requestId,
@@ -875,7 +927,11 @@ class GatewayConnection {
     return result.text.trim();
   }
 
-  private async streamAssistantResponse(requestId: string): Promise<void> {
+  private async streamAssistantResponse(
+    requestId: string,
+    timing: RequestTiming
+  ): Promise<void> {
+    timing.llmStartedAt = this.config.now();
     const run: ActiveRun = {
       requestId,
       controller: new AbortController(),
@@ -886,7 +942,8 @@ class GatewayConnection {
       ttsStarted: false,
       ttsEnded: false,
       ttsSequence: 0,
-      ttsSegmentIndex: 0
+      ttsSegmentIndex: 0,
+      timing
     };
 
     this.session.current = run;
@@ -931,6 +988,16 @@ class GatewayConnection {
 
         run.text += chunk.delta;
         pendingTtsText += chunk.delta;
+        if (run.timing.firstLlmDeltaAt === undefined) {
+          run.timing.firstLlmDeltaAt = this.config.now();
+          this.config.logger.info("latency.llm_first_delta", {
+            sessionId: this.session.sessionId,
+            requestId,
+            requestKind: run.timing.kind,
+            sttPath: run.timing.sttPath,
+            ...requestLatencyFields(run.timing)
+          });
+        }
         this.send({
           type: WS_EVENTS.LLM_DELTA,
           requestId,
@@ -1053,6 +1120,7 @@ class GatewayConnection {
     }
 
     run.stage = "tts_streaming";
+    run.timing.ttsStartedAt ??= this.config.now();
     const segmentIndex = run.ttsSegmentIndex++;
     const audioParts: Buffer[] = [];
     let mimeType = mimeTypeForAudioFormat(this.config.ttsFormat);
@@ -1092,6 +1160,16 @@ class GatewayConnection {
     segmentIndex: number,
     isFinal: boolean
   ): void {
+    if (run.timing.firstTtsChunkAt === undefined) {
+      run.timing.firstTtsChunkAt = this.config.now();
+      this.config.logger.info("latency.tts_first_chunk", {
+        sessionId: this.session.sessionId,
+        requestId: run.requestId,
+        requestKind: run.timing.kind,
+        sttPath: run.timing.sttPath,
+        ...requestLatencyFields(run.timing)
+      });
+    }
     this.send({
       type: WS_EVENTS.TTS_CHUNK,
       requestId: run.requestId,
@@ -1141,7 +1219,14 @@ class GatewayConnection {
     this.config.logger.info("request.finished", {
       sessionId: this.session.sessionId,
       requestId: run.requestId,
-      stage
+      stage,
+      requestKind: run.timing.kind,
+      sttPath: run.timing.sttPath,
+      requestTotalMs: elapsedMs(
+        run.timing.requestStartedAt,
+        this.config.now()
+      ),
+      ...requestLatencyFields(run.timing)
     });
   }
 
@@ -1151,6 +1236,30 @@ class GatewayConnection {
     if (this.session.audioTurns.get(turn.requestId) === turn) {
       this.session.audioTurns.delete(turn.requestId);
     }
+    this.logAudioLatency(
+      turn,
+      turn.state === "done"
+        ? "completed"
+        : turn.state === "error"
+          ? "error"
+          : "interrupted"
+    );
+  }
+
+  private logAudioLatency(
+    turn: ActiveAudioTurn,
+    outcome: "completed" | "interrupted" | "error"
+  ): void {
+    if (turn.latencyLogged) return;
+    turn.latencyLogged = true;
+    this.config.logger.info("latency.stt", {
+      sessionId: this.session.sessionId,
+      requestId: turn.requestId,
+      requestKind: turn.timing.kind,
+      sttPath: turn.timing.sttPath,
+      outcome,
+      ...requestLatencyFields(turn.timing)
+    });
   }
 
   private cancelAudioTurn(requestId: string, reason: string): void {
@@ -1265,6 +1374,49 @@ function pcm16MonoToWav(pcm: Buffer, sampleRate: number): Buffer {
 
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+function requestLatencyFields(timing: RequestTiming): Record<string, number> {
+  return compactDurations({
+    sttFirstPartialMs: elapsedMs(
+      timing.speechStartedAt,
+      timing.firstPartialAt
+    ),
+    sttFinalMs: elapsedMs(timing.speechEndedAt, timing.finalTranscriptAt),
+    sttTotalMs: elapsedMs(timing.speechStartedAt, timing.finalTranscriptAt),
+    llmFirstDeltaMs: elapsedMs(timing.llmStartedAt, timing.firstLlmDeltaAt),
+    inputReadyToFirstLlmMs: elapsedMs(
+      timing.finalTranscriptAt ?? timing.requestStartedAt,
+      timing.firstLlmDeltaAt
+    ),
+    ttsFirstChunkMs: elapsedMs(timing.ttsStartedAt, timing.firstTtsChunkAt),
+    llmFirstToTtsFirstChunkMs: elapsedMs(
+      timing.firstLlmDeltaAt,
+      timing.firstTtsChunkAt
+    ),
+    speechEndToFirstTtsChunkMs: elapsedMs(
+      timing.speechEndedAt,
+      timing.firstTtsChunkAt
+    )
+  });
+}
+
+function elapsedMs(
+  start: number | undefined,
+  end: number | undefined
+): number | undefined {
+  if (start === undefined || end === undefined || end < start) return undefined;
+  return Math.round(end - start);
+}
+
+function compactDurations(
+  fields: Record<string, number | undefined>
+): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(fields).filter(
+      (entry): entry is [string, number] => entry[1] !== undefined
+    )
+  );
 }
 
 function takeReadyTtsSegments(

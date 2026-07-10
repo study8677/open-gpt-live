@@ -10,6 +10,8 @@ and the project uses semantic versioning while it remains pre-1.0.
 
 - Contribution, security, conduct, issue, and pull request guidance for the
   community.
+- Request-scoped browser and Gateway latency telemetry for STT, LLM, TTS, and
+  actual first-audio playback, including request mode and STT path context.
 
 ## 0.2.0 - 2026-07-10
 

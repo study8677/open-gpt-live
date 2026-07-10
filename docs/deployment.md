@@ -93,7 +93,9 @@ This allowlist checks browser `Origin` headers; it is not authentication. Non-br
 
 ## Logs
 
-The Gateway writes one JSON object per line. Events include session connection/disconnection, request completion, Realtime STT fallback, provider failure, and audio size rejection. Logs use `sessionId` and `requestId` for correlation and redact fields whose names look like credentials, audio, transcripts, or message content.
+The Gateway writes one JSON object per line. Events include session connection/disconnection, request completion, Realtime STT fallback, provider failure, audio size rejection, and request-scoped latency. Logs use `sessionId` and `requestId` for correlation and redact fields whose names look like credentials, audio, transcripts, or message content.
+
+Latency events are `latency.stt`, `latency.llm_first_delta`, `latency.tts_first_chunk`, and the terminal `request.finished`. Duration fields end in `Ms`, are derived from the Gateway's monotonic clock, and can be aggregated by `requestKind`, `sttPath` (`batch`, `realtime`, or `batch_fallback`), and terminal `stage`. `ttsFirstChunkMs` measures audio production at the Gateway; actual browser playback is measured only by the Web latency panel.
 
 ## Production checklist
 

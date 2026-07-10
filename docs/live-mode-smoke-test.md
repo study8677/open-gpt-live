@@ -27,6 +27,14 @@ Before starting, confirm `curl http://127.0.0.1:8787/healthz` returns `status: o
 3. Confirm the first word is present in each final transcript.
 4. Confirm the first word is not duplicated.
 
+## Latency Panel
+
+1. Complete one Live Mode turn with TTS enabled.
+2. Confirm `STT first partial`, `Final transcript`, `LLM first token`, `TTS first audio`, and `Speech end → audio` show non-negative values.
+3. Repeat with push-to-talk and confirm `STT first partial` may remain `—` while the applicable final, LLM, and TTS metrics appear.
+4. Interrupt a reply and confirm already measured values remain visible while unfinished stages stay `—`.
+5. Compare the browser panel only within the browser clock domain; use Gateway structured logs for provider-stage aggregation.
+
 ## Partial Transcript And Fallback Guard
 
 1. With Realtime STT enabled, speak for about 10 seconds and confirm provider transcript deltas appear while speaking.

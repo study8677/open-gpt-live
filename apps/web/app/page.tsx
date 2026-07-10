@@ -16,6 +16,15 @@ import {
 } from "../lib/audio-pcm";
 import { resolveVadConfig } from "../lib/live-config";
 import {
+  beginLatencyRequest,
+  markLatency,
+  settleLatencyRequest,
+  type LatencyRegistry,
+  type LatencyRequestKind,
+  type LatencyRequestStatus,
+  type LatencySnapshot
+} from "../lib/latency-metrics";
+import {
   beginRequest,
   canAcceptRequestEvent,
   cancelActiveRequests,
@@ -121,6 +130,7 @@ export default function Home() {
   const livePcmTurnRef = useRef<LivePcmTurn | null>(null);
   const preRollFramesRef = useRef<LivePcmFrame[]>([]);
   const requestLifecyclesRef = useRef<RequestLifecycleRegistry>(new Map());
+  const latencyRegistryRef = useRef<LatencyRegistry>(new Map());
   const activeRequestIdRef = useRef<string | null>(null);
   const playbackQueuesRef = useRef<Map<string, PlaybackQueue>>(new Map());
   const ignoredPlaybackRequestsRef = useRef<Set<string>>(new Set());
@@ -157,6 +167,8 @@ export default function Home() {
   const [manualPlaybackRequestId, setManualPlaybackRequestId] = useState<
     string | null
   >(null);
+  const [latencySnapshot, setLatencySnapshot] =
+    useState<LatencySnapshot | null>(null);
 
   const canSend = useMemo(
     () => connected && input.trim().length > 0 && !activeRequestId,
@@ -308,6 +320,7 @@ export default function Home() {
       ) {
         return;
       }
+      markRequestLatency(message.requestId, "firstLlmDeltaAt");
       setMessages((current) =>
         current.map((item) =>
           item.requestId === message.requestId && item.role === "assistant"
@@ -328,6 +341,7 @@ export default function Home() {
       ) {
         return;
       }
+      markRequestLatency(message.requestId, "firstPartialAt");
       setRecordingStatus("Listening...");
       setMessages((current) => {
         const existing = current.find(
@@ -366,6 +380,7 @@ export default function Home() {
       ) {
         return;
       }
+      markRequestLatency(message.requestId, "finalTranscriptAt");
       transitionRequest(
         requestLifecyclesRef.current,
         message.requestId,
@@ -419,7 +434,10 @@ export default function Home() {
         return;
       }
       if (message.reason === "interrupted" || message.reason === "error") {
-        cancelRequest(message.requestId);
+        cancelRequest(
+          message.requestId,
+          message.reason === "error" ? "error" : "interrupted"
+        );
       } else {
         window.setTimeout(() => {
           if (
@@ -491,7 +509,10 @@ export default function Home() {
         queue.ended = true;
       }
       if (message.reason !== "stop") {
-        cancelRequest(message.requestId);
+        cancelRequest(
+          message.requestId,
+          message.reason === "error" ? "error" : "interrupted"
+        );
       } else if (!queue) {
         completeRequest(message.requestId);
       } else {
@@ -509,7 +530,7 @@ export default function Home() {
       }
       setError(message.message);
       if (message.requestId) {
-        cancelRequest(message.requestId);
+        cancelRequest(message.requestId, "error");
       }
     }
   }
@@ -522,6 +543,7 @@ export default function Home() {
     }
 
     const requestId = createRequestId();
+    beginRequestLatency(requestId, "text");
     beginRequest(requestLifecyclesRef.current, requestId, "responding");
     setError(null);
     setInput("");
@@ -604,6 +626,7 @@ export default function Home() {
 
       pttRecordingRef.current = context;
       requestedStream = null;
+      beginRequestLatency(requestId, "ptt");
       beginRequest(requestLifecyclesRef.current, requestId, "recording");
       setCurrentRequest(requestId);
       setRecording(true);
@@ -626,6 +649,11 @@ export default function Home() {
       recorder.addEventListener("stop", () => {
         void finalizePushToTalkRecording(context);
       });
+      recorder.addEventListener(
+        "start",
+        () => markRequestLatency(requestId, "speechStartedAt"),
+        { once: true }
+      );
 
       recorder.start(recorderTimesliceMs);
     } catch (reason) {
@@ -655,6 +683,7 @@ export default function Home() {
     }
 
     context.finalizing = true;
+    markRequestLatency(context.requestId, "speechEndedAt");
     transitionRequest(
       requestLifecyclesRef.current,
       context.requestId,
@@ -747,6 +776,7 @@ export default function Home() {
       context.requestId,
       "cancelled"
     );
+    settleRequestLatency(context.requestId, "interrupted");
     if (context.recorder.state !== "inactive") {
       context.recorder.stop();
     }
@@ -892,7 +922,7 @@ export default function Home() {
       return;
     }
 
-    const now = Date.now();
+    const now = performance.now();
     const frame: LivePcmFrame = {
       samples,
       durationMs: (samples.length / LIVE_PCM_SAMPLE_RATE) * 1_000
@@ -983,7 +1013,7 @@ export default function Home() {
     }
 
     const requestId = createRequestId();
-    const detectedAt = vadCandidateStartedAtRef.current || Date.now();
+    const detectedAt = vadCandidateStartedAtRef.current || performance.now();
     liveTurnStartedAtRef.current = detectedAt;
     const turn: LivePcmTurn = {
       requestId,
@@ -992,6 +1022,8 @@ export default function Home() {
       cancelled: false
     };
     livePcmTurnRef.current = turn;
+    beginRequestLatency(requestId, "live", detectedAt);
+    markRequestLatency(requestId, "speechStartedAt", detectedAt);
     beginRequest(requestLifecyclesRef.current, requestId, "recording");
     setCurrentRequest(requestId);
     setRecording(true);
@@ -1073,7 +1105,8 @@ export default function Home() {
     }
 
     const socket = socketRef.current;
-    const endedAt = Date.now();
+    const endedAt = performance.now();
+    markRequestLatency(turn.requestId, "speechEndedAt", endedAt);
     if (
       !socket ||
       !sendRaw(socket, {
@@ -1156,11 +1189,12 @@ export default function Home() {
     turn.cancelled = true;
     const socket = socketRef.current;
     if (notifyGateway && socket) {
+      const cancelledAt = performance.now();
       sendRaw(socket, {
         type: WS_EVENTS.VAD_SPEECH_END,
         requestId: turn.requestId,
-        endedAt: Date.now(),
-        durationMs: Date.now() - turn.startedAt,
+        endedAt: cancelledAt,
+        durationMs: cancelledAt - turn.startedAt,
         reason: "cancelled"
       });
       sendRaw(socket, {
@@ -1257,6 +1291,11 @@ export default function Home() {
     );
     objectUrlsRef.current.add(objectUrl);
     const audio = new Audio(objectUrl);
+    audio.addEventListener(
+      "playing",
+      () => markRequestLatency(requestId, "firstAudioPlaybackAt"),
+      { once: true }
+    );
     currentAudioRef.current = audio;
     currentAudioObjectUrlRef.current = objectUrl;
 
@@ -1268,7 +1307,7 @@ export default function Home() {
       finished = true;
       cleanupAudioObjectUrl(objectUrl);
       playbackVadSuppressedUntilRef.current =
-        Date.now() + vadConfig.playbackSuppressAfterEndMs;
+        performance.now() + vadConfig.playbackSuppressAfterEndMs;
       if (currentAudioRef.current === audio) {
         currentAudioRef.current = null;
         currentAudioObjectUrlRef.current = null;
@@ -1399,12 +1438,18 @@ export default function Home() {
 
   function completeRequest(requestId: string): void {
     settleRequest(requestLifecyclesRef.current, requestId, "completed");
+    settleRequestLatency(requestId, "completed");
     playbackQueuesRef.current.delete(requestId);
     clearCurrentRequest(requestId);
   }
 
-  function cancelRequest(requestId: string): void {
+  function cancelRequest(
+    requestId: string,
+    latencyStatus: Exclude<LatencyRequestStatus, "active" | "completed"> =
+      "interrupted"
+  ): void {
     settleRequest(requestLifecyclesRef.current, requestId, "cancelled");
+    settleRequestLatency(requestId, latencyStatus);
     ignorePlaybackRequest(requestId);
 
     const pttContext = pttRecordingRef.current;
@@ -1433,6 +1478,7 @@ export default function Home() {
   function cancelRequestsAfterDisconnect(): void {
     for (const requestId of cancelActiveRequests(requestLifecyclesRef.current)) {
       ignorePlaybackRequest(requestId);
+      settleRequestLatency(requestId, "interrupted");
     }
     cleanupAllPlayback();
     cancelPushToTalkRecording(false);
@@ -1441,6 +1487,48 @@ export default function Home() {
     setActiveRequestId(null);
     setRecording(false);
     setRecordingStatus(null);
+  }
+
+  function beginRequestLatency(
+    requestId: string,
+    kind: LatencyRequestKind,
+    now = performance.now()
+  ): void {
+    setLatencySnapshot(
+      beginLatencyRequest(latencyRegistryRef.current, requestId, kind, now)
+    );
+  }
+
+  function markRequestLatency(
+    requestId: string,
+    mark: Parameters<typeof markLatency>[2],
+    now = performance.now()
+  ): void {
+    const snapshot = markLatency(
+      latencyRegistryRef.current,
+      requestId,
+      mark,
+      now
+    );
+    if (!snapshot) return;
+    setLatencySnapshot((current) =>
+      !current || current.requestId === requestId ? snapshot : current
+    );
+  }
+
+  function settleRequestLatency(
+    requestId: string,
+    status: Exclude<LatencyRequestStatus, "active">
+  ): void {
+    const snapshot = settleLatencyRequest(
+      latencyRegistryRef.current,
+      requestId,
+      status
+    );
+    if (!snapshot) return;
+    setLatencySnapshot((current) =>
+      !current || current.requestId === requestId ? snapshot : current
+    );
   }
 
   return (
@@ -1474,6 +1562,8 @@ export default function Home() {
           </button>
         ) : null}
       </section>
+
+      <LatencyPanel snapshot={latencySnapshot} />
 
       <section className="messages" aria-live="polite">
         {messages.length === 0 ? (
@@ -1560,6 +1650,37 @@ export default function Home() {
         </button>
       </form>
     </main>
+  );
+}
+
+function LatencyPanel({ snapshot }: { snapshot: LatencySnapshot | null }) {
+  const metrics = [
+    ["STT first partial", snapshot?.sttFirstPartialMs],
+    ["Final transcript", snapshot?.sttFinalMs],
+    ["LLM first token", snapshot?.llmFirstDeltaMs],
+    ["TTS first audio", snapshot?.ttsFirstAudioMs],
+    ["Speech end → audio", snapshot?.speechEndToFirstAudioMs]
+  ] as const;
+
+  return (
+    <section className="latencyPanel" aria-label="Voice latency metrics">
+      <div className="latencyHeading">
+        <strong>Latency</strong>
+        <span>
+          {snapshot
+            ? `${snapshot.kind.toUpperCase()} · ${snapshot.status}`
+            : "waiting for a request"}
+        </span>
+      </div>
+      <dl>
+        {metrics.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value === undefined ? "—" : `${value} ms`}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 

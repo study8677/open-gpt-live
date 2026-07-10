@@ -76,6 +76,49 @@ button:disabled {
   gap: 12px;
 }
 
+.latencyPanel {
+  background: #fff;
+  border: 1px solid #deded8;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.latencyHeading {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.latencyHeading span {
+  color: #767676;
+  font-size: 12px;
+}
+
+.latencyPanel dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.latencyPanel dl div {
+  background: #f7f7f4;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.latencyPanel dt {
+  color: #666;
+  font-size: 12px;
+}
+
+.latencyPanel dd {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  margin: 4px 0 0;
+}
+
 .messages {
   background: #fff;
   border: 1px solid #deded8;
@@ -201,5 +244,9 @@ button:disabled {
 
   .composer button {
     min-height: 44px;
+  }
+
+  .latencyPanel dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
